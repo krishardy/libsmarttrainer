@@ -2,10 +2,6 @@
 
 ## TODO
 
-### FTMS Protocol (ftms-parser crate)
-
-- [ ] Capture real notification payloads and add as test vectors [1.8, Med, 1h]
-
 ### BLE Transport (ble-transport crate)
 
 - [ ] Build ble-transport crate: async scan/connect/subscribe with tokio::sync::watch channel API [2.1, High, 6h]
@@ -39,6 +35,7 @@
 - [x] Implement Control Point command serializer (0x2AD9): request control, set target power, resistance, grade [1.3, High, 2h]
 - [x] Implement Feature characteristic parser (0x2ACC) [1.4, Med, 1h]
 - [x] Unit tests with hardcoded byte payloads for all parser functions [1.5, High, 2h]
+- [x] Capture real notification payloads and add as test vectors [1.8, Med, 1h]
 
 ### Workspace & Structure
 

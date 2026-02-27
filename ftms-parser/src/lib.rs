@@ -750,6 +750,112 @@ mod tests {
         );
     }
 
+    // ---------------------------------------------------------------
+    // Real-device test vectors: JetBlack Volt V2
+    // Captured via btmon + bluetoothctl on Linux, 2026-02-27.
+    // Trainer BLE address: E1:A2:F9:12:CF:38
+    // All Indoor Bike Data payloads use flags 0x0264:
+    //   speed + cadence + resistance_level + power + heart_rate
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn real_jetblack_volt_v2_feature() {
+        // Captured from JetBlack Volt V2 via btmon
+        // 0x2ACC Fitness Machine Feature characteristic — ATT Read Response
+        let data = [0x87, 0x44, 0x00, 0x00, 0x0c, 0xe0, 0x00, 0x00];
+        let result = parse_feature(&data).unwrap();
+        // Fitness Machine Features: 0x00004487
+        assert!(result.fitness_machine.contains(FitnessMachineFeatures::AVERAGE_SPEED));
+        assert!(result.fitness_machine.contains(FitnessMachineFeatures::CADENCE));
+        assert!(result.fitness_machine.contains(FitnessMachineFeatures::TOTAL_DISTANCE));
+        assert!(result.fitness_machine.contains(FitnessMachineFeatures::RESISTANCE_LEVEL));
+        assert!(result.fitness_machine.contains(FitnessMachineFeatures::HEART_RATE_MEASUREMENT));
+        assert!(result.fitness_machine.contains(FitnessMachineFeatures::POWER_MEASUREMENT));
+        assert!(!result.fitness_machine.contains(FitnessMachineFeatures::INCLINATION));
+        assert!(!result.fitness_machine.contains(FitnessMachineFeatures::ELAPSED_TIME));
+        // Target Setting Features: 0x0000e00c
+        assert!(result.target_setting.contains(TargetSettingFeatures::RESISTANCE_TARGET));
+        assert!(result.target_setting.contains(TargetSettingFeatures::POWER_TARGET));
+        assert!(result.target_setting.contains(TargetSettingFeatures::INDOOR_BIKE_SIMULATION));
+        assert!(result.target_setting.contains(TargetSettingFeatures::WHEEL_CIRCUMFERENCE));
+        assert!(result.target_setting.contains(TargetSettingFeatures::SPIN_DOWN_CONTROL));
+        assert!(!result.target_setting.contains(TargetSettingFeatures::SPEED_TARGET));
+        assert!(!result.target_setting.contains(TargetSettingFeatures::INCLINATION_TARGET));
+    }
+
+    #[test]
+    fn real_jetblack_volt_v2_indoor_bike_data_at_rest() {
+        // Captured from JetBlack Volt V2 via btmon — trainer idle, not pedaling
+        // 0x2AD2 Indoor Bike Data notification (t≈110s in capture)
+        let data = [0x64, 0x02, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x4f];
+        let result = parse_indoor_bike_data(&data).unwrap();
+        assert!((result.instantaneous_speed_kmh.unwrap()).abs() < 0.01);
+        assert!((result.instantaneous_cadence_rpm.unwrap()).abs() < 0.1);
+        assert_eq!(result.instantaneous_power_watts, Some(0));
+        assert_eq!(result.heart_rate_bpm, Some(79));
+    }
+
+    #[test]
+    fn real_jetblack_volt_v2_indoor_bike_data_easy_spin() {
+        // Captured from JetBlack Volt V2 via btmon — light pedaling
+        // 0x2AD2 Indoor Bike Data notification (t≈143s in capture)
+        let data = [0x64, 0x02, 0xb2, 0x06, 0x7c, 0x00, 0x04, 0x00, 0x3a, 0x00, 0x56];
+        let result = parse_indoor_bike_data(&data).unwrap();
+        assert!((result.instantaneous_speed_kmh.unwrap() - 17.14).abs() < 0.01);
+        assert!((result.instantaneous_cadence_rpm.unwrap() - 62.0).abs() < 0.1);
+        assert_eq!(result.instantaneous_power_watts, Some(58));
+        assert_eq!(result.heart_rate_bpm, Some(86));
+    }
+
+    #[test]
+    fn real_jetblack_volt_v2_indoor_bike_data_moderate_effort() {
+        // Captured from JetBlack Volt V2 via btmon — steady moderate pedaling
+        // 0x2AD2 Indoor Bike Data notification (t≈165s in capture)
+        let data = [0x64, 0x02, 0xd3, 0x0a, 0x90, 0x00, 0x04, 0x00, 0xa2, 0x00, 0x63];
+        let result = parse_indoor_bike_data(&data).unwrap();
+        assert!((result.instantaneous_speed_kmh.unwrap() - 27.71).abs() < 0.01);
+        assert!((result.instantaneous_cadence_rpm.unwrap() - 72.0).abs() < 0.1);
+        assert_eq!(result.instantaneous_power_watts, Some(162));
+        assert_eq!(result.heart_rate_bpm, Some(99));
+    }
+
+    #[test]
+    fn real_jetblack_volt_v2_indoor_bike_data_sprint() {
+        // Captured from JetBlack Volt V2 via btmon — peak sprint effort
+        // 0x2AD2 Indoor Bike Data notification (t≈175s in capture)
+        let data = [0x64, 0x02, 0x42, 0x0f, 0x9e, 0x00, 0x04, 0x00, 0x22, 0x02, 0x6b];
+        let result = parse_indoor_bike_data(&data).unwrap();
+        assert!((result.instantaneous_speed_kmh.unwrap() - 39.06).abs() < 0.01);
+        assert!((result.instantaneous_cadence_rpm.unwrap() - 79.0).abs() < 0.1);
+        assert_eq!(result.instantaneous_power_watts, Some(546));
+        assert_eq!(result.heart_rate_bpm, Some(107));
+    }
+
+    #[test]
+    fn real_jetblack_volt_v2_indoor_bike_data_coast_down() {
+        // Captured from JetBlack Volt V2 via btmon — stopped pedaling, speed decreasing
+        // 0x2AD2 Indoor Bike Data notification (t≈199s in capture)
+        let data = [0x64, 0x02, 0x30, 0x03, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x76];
+        let result = parse_indoor_bike_data(&data).unwrap();
+        assert!((result.instantaneous_speed_kmh.unwrap() - 8.16).abs() < 0.01);
+        assert!((result.instantaneous_cadence_rpm.unwrap()).abs() < 0.1);
+        assert_eq!(result.instantaneous_power_watts, Some(0));
+        assert_eq!(result.heart_rate_bpm, Some(118));
+    }
+
+    #[test]
+    fn real_jetblack_volt_v2_indoor_bike_data_stopped_hr_zero() {
+        // Captured from JetBlack Volt V2 via btmon — fully stopped, HR reports 0
+        // 0x2AD2 Indoor Bike Data notification (t≈207s in capture)
+        // Demonstrates trainer quirk: heart_rate_bpm=0 when fully stopped.
+        let data = [0x64, 0x02, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00];
+        let result = parse_indoor_bike_data(&data).unwrap();
+        assert!((result.instantaneous_speed_kmh.unwrap()).abs() < 0.01);
+        assert!((result.instantaneous_cadence_rpm.unwrap()).abs() < 0.1);
+        assert_eq!(result.instantaneous_power_watts, Some(0));
+        assert_eq!(result.heart_rate_bpm, Some(0));
+    }
+
     #[test]
     fn parse_indoor_bike_data_all_fields() {
         // Flags: MORE_DATA | AVERAGE_SPEED | INSTANTANEOUS_CADENCE |
