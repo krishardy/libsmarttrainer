@@ -1,10 +1,13 @@
-.PHONY: build test clippy clean coverage
+.PHONY: build test test-ftms clippy clean coverage
 
 build:
 	cargo build --workspace
 
 test:
 	cargo test --workspace
+
+test-ftms:
+	cargo test -p ftms-parser
 
 clippy:
 	cargo clippy --workspace -- -D warnings

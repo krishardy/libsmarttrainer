@@ -27,6 +27,69 @@ bitflags! {
     }
 }
 
+bitflags! {
+    /// Feature bits from the Fitness Machine Feature characteristic (0x2ACC),
+    /// first 4 bytes (Fitness Machine Features field).
+    ///
+    /// Each bit indicates that the fitness machine supports the corresponding
+    /// measurement or capability.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct FitnessMachineFeatures: u32 {
+        const AVERAGE_SPEED            = 1 << 0;
+        const CADENCE                  = 1 << 1;
+        const TOTAL_DISTANCE           = 1 << 2;
+        const INCLINATION              = 1 << 3;
+        const ELEVATION_GAIN           = 1 << 4;
+        const PACE                     = 1 << 5;
+        const STEP_COUNT               = 1 << 6;
+        const RESISTANCE_LEVEL         = 1 << 7;
+        const STRIDE_COUNT             = 1 << 8;
+        const EXPENDED_ENERGY          = 1 << 9;
+        const HEART_RATE_MEASUREMENT   = 1 << 10;
+        const METABOLIC_EQUIVALENT     = 1 << 11;
+        const ELAPSED_TIME             = 1 << 12;
+        const REMAINING_TIME           = 1 << 13;
+        const POWER_MEASUREMENT        = 1 << 14;
+        const FORCE_ON_BELT_AND_POWER  = 1 << 15;
+        const USER_DATA_RETENTION      = 1 << 16;
+    }
+}
+
+bitflags! {
+    /// Target Setting Features from the Fitness Machine Feature characteristic
+    /// (0x2ACC), bytes 4–7.
+    ///
+    /// Each bit indicates that the fitness machine supports the corresponding
+    /// target-setting command.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct TargetSettingFeatures: u32 {
+        const SPEED_TARGET                  = 1 << 0;
+        const INCLINATION_TARGET            = 1 << 1;
+        const RESISTANCE_TARGET             = 1 << 2;
+        const POWER_TARGET                  = 1 << 3;
+        const HEART_RATE_TARGET             = 1 << 4;
+        const TARGETED_EXPENDED_ENERGY      = 1 << 5;
+        const TARGETED_STEP_NUMBER          = 1 << 6;
+        const TARGETED_STRIDE_NUMBER        = 1 << 7;
+        const TARGETED_DISTANCE             = 1 << 8;
+        const TARGETED_TRAINING_TIME        = 1 << 9;
+        const TARGETED_TWO_HR_ZONES         = 1 << 10;
+        const TARGETED_THREE_HR_ZONES       = 1 << 11;
+        const TARGETED_FIVE_HR_ZONES        = 1 << 12;
+        const INDOOR_BIKE_SIMULATION        = 1 << 13;
+        const WHEEL_CIRCUMFERENCE           = 1 << 14;
+        const SPIN_DOWN_CONTROL             = 1 << 15;
+        const TARGETED_CADENCE              = 1 << 16;
+    }
+}
+
+/// Parsed Fitness Machine Feature characteristic (0x2ACC).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FitnessMachineFeature {
+    pub fitness_machine: FitnessMachineFeatures,
+    pub target_setting: TargetSettingFeatures,
+}
+
 /// Parsed fields from an Indoor Bike Data notification.
 #[derive(Debug, Clone, PartialEq)]
 pub struct IndoorBikeData {
@@ -257,13 +320,22 @@ pub fn parse_control_point_response(data: &[u8]) -> Result<ControlPointResponse,
 
 /// Parse the Fitness Machine Feature characteristic (0x2ACC).
 ///
-/// Returns the raw feature bitfield as a `u32`. Full flag interpretation is
-/// deferred to a later task.
-pub fn parse_feature(data: &[u8]) -> Result<u32, ParseError> {
-    if data.len() < 4 {
+/// The characteristic is 8 bytes: 4 bytes for Fitness Machine Features followed
+/// by 4 bytes for Target Setting Features.
+pub fn parse_feature(data: &[u8]) -> Result<FitnessMachineFeature, ParseError> {
+    if data.len() < 8 {
         return Err(ParseError::TooShort);
     }
-    Ok(u32::from_le_bytes([data[0], data[1], data[2], data[3]]))
+    let fitness_machine = FitnessMachineFeatures::from_bits_truncate(
+        u32::from_le_bytes([data[0], data[1], data[2], data[3]]),
+    );
+    let target_setting = TargetSettingFeatures::from_bits_truncate(
+        u32::from_le_bytes([data[4], data[5], data[6], data[7]]),
+    );
+    Ok(FitnessMachineFeature {
+        fitness_machine,
+        target_setting,
+    })
 }
 
 #[cfg(test)]
@@ -316,13 +388,81 @@ mod tests {
 
     #[test]
     fn parse_feature_valid() {
-        let data = [0x01, 0x02, 0x03, 0x04];
-        assert_eq!(parse_feature(&data), Ok(0x04030201));
+        // Fitness Machine Features: AVERAGE_SPEED (bit 0) = 0x00000001
+        // Target Setting Features: SPEED_TARGET (bit 0) = 0x00000001
+        let data = [0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00];
+        let result = parse_feature(&data).unwrap();
+        assert!(result.fitness_machine.contains(FitnessMachineFeatures::AVERAGE_SPEED));
+        assert!(result.target_setting.contains(TargetSettingFeatures::SPEED_TARGET));
     }
 
     #[test]
     fn parse_feature_too_short() {
         assert_eq!(parse_feature(&[0x01, 0x02]), Err(ParseError::TooShort));
+    }
+
+    #[test]
+    fn parse_feature_power_and_cadence() {
+        // POWER_MEASUREMENT (bit 14) | CADENCE (bit 1) = 0x4002
+        let fm_bits: u32 = (1 << 14) | (1 << 1);
+        let mut data = [0u8; 8];
+        data[..4].copy_from_slice(&fm_bits.to_le_bytes());
+        let result = parse_feature(&data).unwrap();
+        assert!(result.fitness_machine.contains(FitnessMachineFeatures::POWER_MEASUREMENT));
+        assert!(result.fitness_machine.contains(FitnessMachineFeatures::CADENCE));
+        assert!(!result.fitness_machine.contains(FitnessMachineFeatures::AVERAGE_SPEED));
+    }
+
+    #[test]
+    fn parse_feature_target_settings() {
+        // Target: POWER_TARGET (bit 3) | RESISTANCE_TARGET (bit 2) | INCLINATION_TARGET (bit 1)
+        let ts_bits: u32 = (1 << 3) | (1 << 2) | (1 << 1);
+        let mut data = [0u8; 8];
+        data[4..8].copy_from_slice(&ts_bits.to_le_bytes());
+        let result = parse_feature(&data).unwrap();
+        assert!(result.fitness_machine.is_empty());
+        assert!(result.target_setting.contains(TargetSettingFeatures::POWER_TARGET));
+        assert!(result.target_setting.contains(TargetSettingFeatures::RESISTANCE_TARGET));
+        assert!(result.target_setting.contains(TargetSettingFeatures::INCLINATION_TARGET));
+        assert!(!result.target_setting.contains(TargetSettingFeatures::SPEED_TARGET));
+    }
+
+    #[test]
+    fn parse_feature_empty_features() {
+        let data = [0u8; 8];
+        let result = parse_feature(&data).unwrap();
+        assert!(result.fitness_machine.is_empty());
+        assert!(result.target_setting.is_empty());
+    }
+
+    #[test]
+    fn parse_feature_ignores_extra_bytes() {
+        let mut data = [0u8; 10];
+        data[0] = 0x01; // AVERAGE_SPEED
+        data[4] = 0x08; // POWER_TARGET
+        data[8] = 0xFF; // extra, ignored
+        data[9] = 0xFF; // extra, ignored
+        let result = parse_feature(&data).unwrap();
+        assert!(result.fitness_machine.contains(FitnessMachineFeatures::AVERAGE_SPEED));
+        assert!(result.target_setting.contains(TargetSettingFeatures::POWER_TARGET));
+    }
+
+    #[test]
+    fn parse_feature_too_short_7_bytes() {
+        assert_eq!(parse_feature(&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]), Err(ParseError::TooShort));
+    }
+
+    #[test]
+    fn feature_bitflags_round_trip() {
+        let fm = FitnessMachineFeatures::CADENCE | FitnessMachineFeatures::POWER_MEASUREMENT;
+        assert_eq!(fm.bits(), (1 << 1) | (1 << 14));
+        assert!(fm.contains(FitnessMachineFeatures::CADENCE));
+        assert!(!fm.contains(FitnessMachineFeatures::AVERAGE_SPEED));
+
+        let ts = TargetSettingFeatures::POWER_TARGET | TargetSettingFeatures::INDOOR_BIKE_SIMULATION;
+        assert_eq!(ts.bits(), (1 << 3) | (1 << 13));
+        assert!(ts.contains(TargetSettingFeatures::POWER_TARGET));
+        assert!(!ts.contains(TargetSettingFeatures::SPEED_TARGET));
     }
 
     #[test]
