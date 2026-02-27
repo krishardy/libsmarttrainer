@@ -1,9 +1,6 @@
 # Build artifacts
 /target/
 
-# Generated FFI headers
-ftms-parser-ffi/include/
-
 # IDE files
 .idea/
 .vscode/

@@ -8,18 +8,6 @@
 - [ ] Connection state tracking (connecting/connected/disconnected state machine) [2.8, Med, 1h]
 - [ ] Automatic reconnection logic on BLE drop [2.9, Med, 3h]
 
-### iOS FFI (ftms-parser-ffi crate)
-
-- [ ] ftms-parser-ffi: extern "C" functions + cbindgen header generation [3.1, High, 3h]
-- [ ] Cross-compile for aarch64-apple-ios and aarch64-apple-ios-sim targets [3.2, High, 2h]
-- [ ] Wire notification bytes through Rust FFI parser [3.5, High, 2h]
-
-### iOS BLE (Swift companion module)
-
-- [ ] CoreBluetooth manager class: scan for 0x1826, connect, discover, subscribe [3.4, High, 6h]
-- [ ] Background BLE: bluetooth-central mode, state restoration [3.10, Med, 3h]
-- [ ] Reconnection handling (iOS) [3.11, Med, 2h]
-
 ### Hardening
 
 - [ ] Graceful error types: BLE permission denied, trainer not found, characteristic missing [4.4, High, 2h]
@@ -39,4 +27,4 @@
 
 ### Workspace & Structure
 
-- [x] Set up Rust workspace with crate structure (ftms-parser, ftms-parser-ffi, ble-transport) [1.1, High, 2h]
+- [x] Set up Rust workspace with crate structure (ftms-parser, ble-transport) [1.1, High, 2h]

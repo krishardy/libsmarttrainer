@@ -1,5 +1,0 @@
-language = "C"
-include_guard = "FTMS_PARSER_FFI_H"
-
-[export]
-include = ["FfiBikeData"]

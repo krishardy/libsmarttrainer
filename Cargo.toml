@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "ftms-parser",
-    "ftms-parser-ffi",
     "ble-transport",
 ]
 resolver = "3"
