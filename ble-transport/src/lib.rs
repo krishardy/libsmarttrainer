@@ -1,4 +1,21 @@
+pub mod commands;
+pub mod connection;
+pub mod constants;
+pub mod error;
+pub mod scanner;
+pub mod traits;
+pub mod transport;
+
 use ftms_parser::IndoorBikeData;
+
+// Re-export key public types.
+pub use commands::TrainerCommand;
+pub use connection::FtmsConnection;
+pub use constants::*;
+pub use error::BleTransportError;
+pub use scanner::{get_adapter, scan_for_ftms_devices, DiscoveredDevice};
+pub use traits::{BleAdapter, BlePeripheral, BtleplugAdapter, BtleplugPeripheral};
+pub use transport::{connect_to_trainer, TrainerHandle};
 
 /// BLE connection state for the trainer.
 #[derive(Debug, Clone, PartialEq, Eq)]
