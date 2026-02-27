@@ -4,7 +4,6 @@
 
 ### FTMS Protocol (ftms-parser crate)
 
-- [ ] Unit tests with hardcoded byte payloads for all parser functions [1.5, High, 2h]
 - [ ] Capture real notification payloads and add as test vectors [1.8, Med, 1h]
 
 ### BLE Transport (ble-transport crate)
@@ -12,11 +11,6 @@
 - [ ] Build ble-transport crate: async scan/connect/subscribe with tokio::sync::watch channel API [2.1, High, 6h]
 - [ ] Connection state tracking (connecting/connected/disconnected state machine) [2.8, Med, 1h]
 - [ ] Automatic reconnection logic on BLE drop [2.9, Med, 3h]
-
-### CLI Proof of Concept
-
-- [ ] CLI binary: scan for FTMS devices, connect, subscribe to 0x2AD2, print parsed data to stdout [1.6, High, 4h]
-- [ ] Extend CLI: request control and send ERG wattage target [1.7, High, 2h]
 
 ### iOS FFI (ftms-parser-ffi crate)
 
@@ -44,6 +38,7 @@
 - [x] Implement Indoor Bike Data parser (0x2AD2): flags bitfield walking, speed/cadence/power extraction [1.2, High, 4h]
 - [x] Implement Control Point command serializer (0x2AD9): request control, set target power, resistance, grade [1.3, High, 2h]
 - [x] Implement Feature characteristic parser (0x2ACC) [1.4, Med, 1h]
+- [x] Unit tests with hardcoded byte payloads for all parser functions [1.5, High, 2h]
 
 ### Workspace & Structure
 

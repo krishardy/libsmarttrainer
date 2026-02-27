@@ -403,10 +403,8 @@ mod tests {
 
     #[test]
     fn parse_feature_power_and_cadence() {
-        // POWER_MEASUREMENT (bit 14) | CADENCE (bit 1) = 0x4002
-        let fm_bits: u32 = (1 << 14) | (1 << 1);
-        let mut data = [0u8; 8];
-        data[..4].copy_from_slice(&fm_bits.to_le_bytes());
+        // POWER_MEASUREMENT (bit 14) | CADENCE (bit 1) = 0x00004002
+        let data = [0x02, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
         let result = parse_feature(&data).unwrap();
         assert!(result.fitness_machine.contains(FitnessMachineFeatures::POWER_MEASUREMENT));
         assert!(result.fitness_machine.contains(FitnessMachineFeatures::CADENCE));
@@ -415,10 +413,8 @@ mod tests {
 
     #[test]
     fn parse_feature_target_settings() {
-        // Target: POWER_TARGET (bit 3) | RESISTANCE_TARGET (bit 2) | INCLINATION_TARGET (bit 1)
-        let ts_bits: u32 = (1 << 3) | (1 << 2) | (1 << 1);
-        let mut data = [0u8; 8];
-        data[4..8].copy_from_slice(&ts_bits.to_le_bytes());
+        // Target: POWER_TARGET (bit 3) | RESISTANCE_TARGET (bit 2) | INCLINATION_TARGET (bit 1) = 0x0000000E
+        let data = [0x00, 0x00, 0x00, 0x00, 0x0E, 0x00, 0x00, 0x00];
         let result = parse_feature(&data).unwrap();
         assert!(result.fitness_machine.is_empty());
         assert!(result.target_setting.contains(TargetSettingFeatures::POWER_TARGET));
@@ -644,6 +640,114 @@ mod tests {
         // HEART_RATE = 0x0200.
         let data = [0x00, 0x02, 0xC4, 0x09];
         assert_eq!(parse_indoor_bike_data(&data), Err(ParseError::TooShort));
+    }
+
+    #[test]
+    fn parse_feature_typical_indoor_bike_trainer() {
+        // Fitness Machine Features: CADENCE(1) | RESISTANCE_LEVEL(7) | ELAPSED_TIME(12) | POWER_MEASUREMENT(14) = 0x00005082
+        // Target Setting Features: RESISTANCE_TARGET(2) | POWER_TARGET(3) | INDOOR_BIKE_SIMULATION(13) = 0x0000200C
+        let data = [0x82, 0x50, 0x00, 0x00, 0x0C, 0x20, 0x00, 0x00];
+        let result = parse_feature(&data).unwrap();
+        assert!(result.fitness_machine.contains(FitnessMachineFeatures::CADENCE));
+        assert!(result.fitness_machine.contains(FitnessMachineFeatures::RESISTANCE_LEVEL));
+        assert!(result.fitness_machine.contains(FitnessMachineFeatures::ELAPSED_TIME));
+        assert!(result.fitness_machine.contains(FitnessMachineFeatures::POWER_MEASUREMENT));
+        assert!(!result.fitness_machine.contains(FitnessMachineFeatures::AVERAGE_SPEED));
+        assert!(!result.fitness_machine.contains(FitnessMachineFeatures::HEART_RATE_MEASUREMENT));
+        assert!(result.target_setting.contains(TargetSettingFeatures::RESISTANCE_TARGET));
+        assert!(result.target_setting.contains(TargetSettingFeatures::POWER_TARGET));
+        assert!(result.target_setting.contains(TargetSettingFeatures::INDOOR_BIKE_SIMULATION));
+        assert!(!result.target_setting.contains(TargetSettingFeatures::SPEED_TARGET));
+        assert!(!result.target_setting.contains(TargetSettingFeatures::INCLINATION_TARGET));
+    }
+
+    #[test]
+    fn parse_indoor_bike_data_speed_and_heart_rate() {
+        // Flags: HEART_RATE = 0x0200, MORE_DATA not set => speed present.
+        // Speed: 2800 => 28.00 km/h, HR: 145 bpm
+        let data = [0x00, 0x02, 0xF0, 0x0A, 0x91];
+        let result = parse_indoor_bike_data(&data).unwrap();
+        assert!((result.instantaneous_speed_kmh.unwrap() - 28.0).abs() < 0.01);
+        assert_eq!(result.instantaneous_cadence_rpm, None);
+        assert_eq!(result.instantaneous_power_watts, None);
+        assert_eq!(result.heart_rate_bpm, Some(145));
+    }
+
+    #[test]
+    fn parse_indoor_bike_data_zero_speed() {
+        // Flags: 0x0000, Speed: 0 => 0.00 km/h
+        let data = [0x00, 0x00, 0x00, 0x00];
+        let result = parse_indoor_bike_data(&data).unwrap();
+        assert!((result.instantaneous_speed_kmh.unwrap()).abs() < 0.01);
+        assert_eq!(result.instantaneous_cadence_rpm, None);
+        assert_eq!(result.instantaneous_power_watts, None);
+        assert_eq!(result.heart_rate_bpm, None);
+    }
+
+    #[test]
+    fn parse_indoor_bike_data_high_cadence_high_power() {
+        // Flags: INSTANTANEOUS_CADENCE | INSTANTANEOUS_POWER = 0x0044
+        // Speed: 4500 => 45.00 km/h, Cadence: 240 => 120.0 rpm, Power: 400W
+        let data = [0x44, 0x00, 0x94, 0x11, 0xF0, 0x00, 0x90, 0x01];
+        let result = parse_indoor_bike_data(&data).unwrap();
+        assert!((result.instantaneous_speed_kmh.unwrap() - 45.0).abs() < 0.01);
+        assert!((result.instantaneous_cadence_rpm.unwrap() - 120.0).abs() < 0.1);
+        assert_eq!(result.instantaneous_power_watts, Some(400));
+    }
+
+    #[test]
+    fn parse_indoor_bike_data_negative_power() {
+        // Flags: INSTANTANEOUS_POWER = 0x0040
+        // Speed: 1000 => 10.00 km/h, Power: -10W (0xFFF6 as i16 LE)
+        let data = [0x40, 0x00, 0xE8, 0x03, 0xF6, 0xFF];
+        let result = parse_indoor_bike_data(&data).unwrap();
+        assert!((result.instantaneous_speed_kmh.unwrap() - 10.0).abs() < 0.01);
+        assert_eq!(result.instantaneous_power_watts, Some(-10));
+    }
+
+    #[test]
+    fn parse_indoor_bike_data_more_data_power_only() {
+        // Flags: MORE_DATA | INSTANTANEOUS_POWER = 0x0041
+        // No speed bytes (MORE_DATA set), Power: 150W
+        let data = [0x41, 0x00, 0x96, 0x00];
+        let result = parse_indoor_bike_data(&data).unwrap();
+        assert_eq!(result.instantaneous_speed_kmh, None);
+        assert_eq!(result.instantaneous_cadence_rpm, None);
+        assert_eq!(result.instantaneous_power_watts, Some(150));
+        assert_eq!(result.heart_rate_bpm, None);
+    }
+
+    #[test]
+    fn parse_control_point_response_extra_bytes() {
+        // Some trainers send trailing padding bytes; parser should ignore them.
+        let data = [0x80, 0x05, 0x01, 0x00, 0x00];
+        let resp = parse_control_point_response(&data).unwrap();
+        assert_eq!(resp.request_op_code, control_point::SET_TARGET_POWER);
+        assert_eq!(resp.result_code, ControlPointResultCode::Success);
+    }
+
+    #[test]
+    fn serialize_set_target_resistance_zero() {
+        assert_eq!(
+            serialize_control_point_set_target_resistance(0),
+            [0x04, 0x00]
+        );
+    }
+
+    #[test]
+    fn serialize_set_target_power_zero() {
+        assert_eq!(
+            serialize_control_point_set_target_power(0),
+            [0x05, 0x00, 0x00]
+        );
+    }
+
+    #[test]
+    fn serialize_set_target_inclination_zero() {
+        assert_eq!(
+            serialize_control_point_set_target_inclination(0),
+            [0x03, 0x00, 0x00]
+        );
     }
 
     #[test]
