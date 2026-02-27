@@ -1,0 +1,9 @@
+[package]
+name = "ble-transport"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+btleplug = "0.11"
+tokio = { version = "1", features = ["full"] }
+ftms-parser = { path = "../ftms-parser" }
