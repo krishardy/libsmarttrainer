@@ -4,7 +4,6 @@
 
 ### FTMS Protocol (ftms-parser crate)
 
-- [ ] Implement Control Point command serializer (0x2AD9): request control, set target power, resistance, grade [1.3, High, 2h]
 - [ ] Implement Feature characteristic parser (0x2ACC) [1.4, Med, 1h]
 - [ ] Unit tests with hardcoded byte payloads for all parser functions [1.5, High, 2h]
 - [ ] Capture real notification payloads and add as test vectors [1.8, Med, 1h]
@@ -44,6 +43,7 @@
 ### FTMS Protocol (ftms-parser crate)
 
 - [x] Implement Indoor Bike Data parser (0x2AD2): flags bitfield walking, speed/cadence/power extraction [1.2, High, 4h]
+- [x] Implement Control Point command serializer (0x2AD9): request control, set target power, resistance, grade [1.3, High, 2h]
 
 ### Workspace & Structure
 

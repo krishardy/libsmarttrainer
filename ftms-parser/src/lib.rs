@@ -49,6 +49,33 @@ pub enum ParseError {
     InvalidData,
 }
 
+/// FTMS Control Point op codes (written to 0x2AD9).
+pub mod control_point {
+    pub const REQUEST_CONTROL: u8 = 0x00;
+    pub const RESET: u8 = 0x01;
+    pub const SET_TARGET_INCLINATION: u8 = 0x03;
+    pub const SET_TARGET_RESISTANCE: u8 = 0x04;
+    pub const SET_TARGET_POWER: u8 = 0x05;
+    pub const RESPONSE_CODE: u8 = 0x80;
+}
+
+/// Result code from a Control Point indication response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlPointResultCode {
+    Success,
+    NotSupported,
+    InvalidParameter,
+    OperationFailed,
+    Unknown(u8),
+}
+
+/// Parsed Control Point indication response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ControlPointResponse {
+    pub request_op_code: u8,
+    pub result_code: ControlPointResultCode,
+}
+
 /// Parse a raw Indoor Bike Data (0x2AD2) notification payload.
 ///
 /// Returns the parsed data fields based on the flags present in the first two
@@ -170,7 +197,62 @@ pub fn parse_indoor_bike_data(data: &[u8]) -> Result<IndoorBikeData, ParseError>
 ///
 /// Returns the raw bytes to write to the Control Point characteristic (0x2AD9).
 pub fn serialize_control_point_request_control() -> [u8; 1] {
-    [0x00]
+    [control_point::REQUEST_CONTROL]
+}
+
+/// Serialize a Fitness Machine Control Point "Reset" command (op code 0x01).
+pub fn serialize_control_point_reset() -> [u8; 1] {
+    [control_point::RESET]
+}
+
+/// Serialize a Fitness Machine Control Point "Set Target Power" command (op code
+/// 0x05).
+///
+/// `watts` is the target power in watts (sint16, 1 W resolution).
+pub fn serialize_control_point_set_target_power(watts: i16) -> [u8; 3] {
+    let bytes = watts.to_le_bytes();
+    [control_point::SET_TARGET_POWER, bytes[0], bytes[1]]
+}
+
+/// Serialize a Fitness Machine Control Point "Set Target Resistance Level"
+/// command (op code 0x04).
+///
+/// `level` is the raw uint8 value with 0.1 resolution (caller applies scaling).
+pub fn serialize_control_point_set_target_resistance(level: u8) -> [u8; 2] {
+    [control_point::SET_TARGET_RESISTANCE, level]
+}
+
+/// Serialize a Fitness Machine Control Point "Set Target Inclination" command
+/// (op code 0x03).
+///
+/// `inclination_01_pct` is the raw sint16 value with 0.1% resolution (caller
+/// applies scaling).
+pub fn serialize_control_point_set_target_inclination(inclination_01_pct: i16) -> [u8; 3] {
+    let bytes = inclination_01_pct.to_le_bytes();
+    [control_point::SET_TARGET_INCLINATION, bytes[0], bytes[1]]
+}
+
+/// Parse a Fitness Machine Control Point indication response.
+///
+/// The response format is `[0x80, <request_op_code>, <result_code>]`.
+pub fn parse_control_point_response(data: &[u8]) -> Result<ControlPointResponse, ParseError> {
+    if data.len() < 3 {
+        return Err(ParseError::TooShort);
+    }
+    if data[0] != control_point::RESPONSE_CODE {
+        return Err(ParseError::InvalidData);
+    }
+    let result_code = match data[2] {
+        0x01 => ControlPointResultCode::Success,
+        0x02 => ControlPointResultCode::NotSupported,
+        0x03 => ControlPointResultCode::InvalidParameter,
+        0x06 => ControlPointResultCode::OperationFailed,
+        other => ControlPointResultCode::Unknown(other),
+    };
+    Ok(ControlPointResponse {
+        request_op_code: data[1],
+        result_code,
+    })
 }
 
 /// Parse the Fitness Machine Feature characteristic (0x2ACC).
@@ -250,5 +332,208 @@ mod tests {
         assert_eq!(flags.bits(), 0x0044);
         assert!(flags.contains(IndoorBikeDataFlags::INSTANTANEOUS_CADENCE));
         assert!(!flags.contains(IndoorBikeDataFlags::MORE_DATA));
+    }
+
+    #[test]
+    fn serialize_reset() {
+        assert_eq!(serialize_control_point_reset(), [0x01]);
+    }
+
+    #[test]
+    fn serialize_set_target_power_200w() {
+        assert_eq!(
+            serialize_control_point_set_target_power(200),
+            [0x05, 0xC8, 0x00]
+        );
+    }
+
+    #[test]
+    fn serialize_set_target_power_negative() {
+        let bytes = serialize_control_point_set_target_power(-50);
+        // Round-trip: parse the sint16 back out.
+        let raw = i16::from_le_bytes([bytes[1], bytes[2]]);
+        assert_eq!(raw, -50);
+        assert_eq!(bytes[0], control_point::SET_TARGET_POWER);
+    }
+
+    #[test]
+    fn serialize_set_target_resistance_5_0() {
+        // 5.0 at 0.1 resolution = raw value 50 (0x32)
+        assert_eq!(
+            serialize_control_point_set_target_resistance(0x32),
+            [0x04, 0x32]
+        );
+    }
+
+    #[test]
+    fn serialize_set_target_inclination_3_0_pct() {
+        // 3.0% at 0.1% resolution = raw value 30 (0x1E)
+        assert_eq!(
+            serialize_control_point_set_target_inclination(30),
+            [0x03, 0x1E, 0x00]
+        );
+    }
+
+    #[test]
+    fn serialize_set_target_inclination_negative() {
+        let bytes = serialize_control_point_set_target_inclination(-20);
+        let raw = i16::from_le_bytes([bytes[1], bytes[2]]);
+        assert_eq!(raw, -20);
+        assert_eq!(bytes[0], control_point::SET_TARGET_INCLINATION);
+    }
+
+    #[test]
+    fn parse_control_point_response_success() {
+        let data = [0x80, 0x00, 0x01];
+        let resp = parse_control_point_response(&data).unwrap();
+        assert_eq!(resp.request_op_code, control_point::REQUEST_CONTROL);
+        assert_eq!(resp.result_code, ControlPointResultCode::Success);
+    }
+
+    #[test]
+    fn parse_control_point_response_not_supported() {
+        let data = [0x80, 0x05, 0x02];
+        let resp = parse_control_point_response(&data).unwrap();
+        assert_eq!(resp.request_op_code, control_point::SET_TARGET_POWER);
+        assert_eq!(resp.result_code, ControlPointResultCode::NotSupported);
+    }
+
+    #[test]
+    fn parse_control_point_response_too_short() {
+        assert_eq!(
+            parse_control_point_response(&[0x80, 0x00]),
+            Err(ParseError::TooShort)
+        );
+    }
+
+    #[test]
+    fn parse_control_point_response_invalid_prefix() {
+        assert_eq!(
+            parse_control_point_response(&[0x00, 0x00, 0x01]),
+            Err(ParseError::InvalidData)
+        );
+    }
+
+    #[test]
+    fn parse_control_point_response_invalid_parameter() {
+        let data = [0x80, 0x05, 0x03];
+        let resp = parse_control_point_response(&data).unwrap();
+        assert_eq!(resp.request_op_code, control_point::SET_TARGET_POWER);
+        assert_eq!(resp.result_code, ControlPointResultCode::InvalidParameter);
+    }
+
+    #[test]
+    fn parse_control_point_response_operation_failed() {
+        let data = [0x80, 0x04, 0x06];
+        let resp = parse_control_point_response(&data).unwrap();
+        assert_eq!(resp.request_op_code, control_point::SET_TARGET_RESISTANCE);
+        assert_eq!(resp.result_code, ControlPointResultCode::OperationFailed);
+    }
+
+    #[test]
+    fn parse_control_point_response_unknown_code() {
+        let data = [0x80, 0x01, 0xFF];
+        let resp = parse_control_point_response(&data).unwrap();
+        assert_eq!(resp.request_op_code, control_point::RESET);
+        assert_eq!(resp.result_code, ControlPointResultCode::Unknown(0xFF));
+    }
+
+    #[test]
+    fn parse_indoor_bike_data_truncated_avg_speed() {
+        // AVERAGE_SPEED flag set but no data for it after speed bytes.
+        // Flags: AVERAGE_SPEED = 0x0002, MORE_DATA not set => speed present.
+        // Provide flags + speed only, no avg speed bytes.
+        let data = [0x02, 0x00, 0xC4, 0x09];
+        assert_eq!(parse_indoor_bike_data(&data), Err(ParseError::TooShort));
+    }
+
+    #[test]
+    fn parse_indoor_bike_data_truncated_cadence() {
+        // INSTANTANEOUS_CADENCE flag set but payload ends before cadence bytes.
+        // Flags: INSTANTANEOUS_CADENCE = 0x0004.
+        let data = [0x04, 0x00, 0xC4, 0x09];
+        assert_eq!(parse_indoor_bike_data(&data), Err(ParseError::TooShort));
+    }
+
+    #[test]
+    fn parse_indoor_bike_data_truncated_avg_cadence() {
+        // INSTANTANEOUS_CADENCE | AVERAGE_CADENCE = 0x000C.
+        // Provide speed + cadence but no avg cadence.
+        let data = [0x0C, 0x00, 0xC4, 0x09, 0xB4, 0x00];
+        assert_eq!(parse_indoor_bike_data(&data), Err(ParseError::TooShort));
+    }
+
+    #[test]
+    fn parse_indoor_bike_data_truncated_total_distance() {
+        // TOTAL_DISTANCE = 0x0010.
+        let data = [0x10, 0x00, 0xC4, 0x09];
+        assert_eq!(parse_indoor_bike_data(&data), Err(ParseError::TooShort));
+    }
+
+    #[test]
+    fn parse_indoor_bike_data_truncated_resistance() {
+        // RESISTANCE_LEVEL = 0x0020.
+        let data = [0x20, 0x00, 0xC4, 0x09];
+        assert_eq!(parse_indoor_bike_data(&data), Err(ParseError::TooShort));
+    }
+
+    #[test]
+    fn parse_indoor_bike_data_truncated_power() {
+        // INSTANTANEOUS_POWER = 0x0040.
+        let data = [0x40, 0x00, 0xC4, 0x09];
+        assert_eq!(parse_indoor_bike_data(&data), Err(ParseError::TooShort));
+    }
+
+    #[test]
+    fn parse_indoor_bike_data_truncated_avg_power() {
+        // INSTANTANEOUS_POWER | AVERAGE_POWER = 0x00C0.
+        // Provide speed + power but no avg power.
+        let data = [0xC0, 0x00, 0xC4, 0x09, 0xC8, 0x00];
+        assert_eq!(parse_indoor_bike_data(&data), Err(ParseError::TooShort));
+    }
+
+    #[test]
+    fn parse_indoor_bike_data_truncated_expended_energy() {
+        // EXPENDED_ENERGY = 0x0100.
+        let data = [0x00, 0x01, 0xC4, 0x09];
+        assert_eq!(parse_indoor_bike_data(&data), Err(ParseError::TooShort));
+    }
+
+    #[test]
+    fn parse_indoor_bike_data_truncated_heart_rate() {
+        // HEART_RATE = 0x0200.
+        let data = [0x00, 0x02, 0xC4, 0x09];
+        assert_eq!(parse_indoor_bike_data(&data), Err(ParseError::TooShort));
+    }
+
+    #[test]
+    fn parse_indoor_bike_data_all_fields() {
+        // Flags: MORE_DATA | AVERAGE_SPEED | INSTANTANEOUS_CADENCE |
+        //        AVERAGE_CADENCE | TOTAL_DISTANCE | RESISTANCE_LEVEL |
+        //        INSTANTANEOUS_POWER | AVERAGE_POWER | EXPENDED_ENERGY |
+        //        HEART_RATE = 0x03FF
+        //
+        // Layout after 2-byte flags:
+        //   avg speed (2), inst cadence (2), avg cadence (2),
+        //   total distance (3), resistance level (2), inst power (2),
+        //   avg power (2), expended energy (5), heart rate (1)
+        let data: [u8; 23] = [
+            0xFF, 0x03, // flags
+            0x00, 0x00, // avg speed (skipped)
+            0xB4, 0x00, // inst cadence: 180 => 90.0 rpm
+            0x00, 0x00, // avg cadence (skipped)
+            0x00, 0x00, 0x00, // total distance (skipped)
+            0x00, 0x00, // resistance level (skipped)
+            0xC8, 0x00, // inst power: 200W
+            0x00, 0x00, // avg power (skipped)
+            0x00, 0x00, 0x00, 0x00, 0x00, // expended energy (skipped)
+            0x48, // heart rate: 72 bpm
+        ];
+        let result = parse_indoor_bike_data(&data).unwrap();
+        // MORE_DATA set => no speed
+        assert_eq!(result.instantaneous_speed_kmh, None);
+        assert!((result.instantaneous_cadence_rpm.unwrap() - 90.0).abs() < 0.1);
+        assert_eq!(result.instantaneous_power_watts, Some(200));
+        assert_eq!(result.heart_rate_bpm, Some(72));
     }
 }
