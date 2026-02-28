@@ -40,6 +40,10 @@ The JetBlack Volt V2 (and potentially other trainers) reports `heart_rate_bpm=0`
 
 Safety-critical writes (ERG death spiral overrides, ramp ticks) bypass the debouncer entirely but call `record_write()` to reset the timer. `Disconnect` and `Reset` also bypass debouncing. The `CommandDebouncer` uses deterministic time injection (`Instant` parameters) for testability, following the same pattern as `ErgSafetyMonitor` in the safety crate.
 
+## Examples as documentation (examples/)
+
+Runnable Cargo examples in `ble-transport/examples/` serve as the primary API documentation for library consumers. Each example covers one aspect of the library (scan, connect, read, write) plus a combined end-to-end workflow. Examples are not CI-runnable since they require BLE hardware and a powered-on trainer, but compilation is verified via `make build-examples` which runs `cargo build -p ble-transport --examples`.
+
 ## Feature capability validation (transport.rs, connection.rs)
 
 The Feature characteristic (0x2ACC) is read at connect time and the parsed `FitnessMachineFeature` is stored in `FtmsCharacteristics`. Before sending control commands, `validate_command_feature()` checks the trainer's `TargetSettingFeatures` flags. The validation is **fail-open**: if feature parsing failed (e.g., read error, malformed data), commands are sent unconditionally. This prevents a parsing edge case from blocking a functional trainer. Only when a feature is explicitly absent does the command get skipped with a warning log.

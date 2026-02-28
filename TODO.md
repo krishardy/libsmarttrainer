@@ -8,15 +8,20 @@
 - [ ] Trainer-specific quirk testing and workarounds [4.7, Med, 4h]
 - [ ] Move any JetBlack Volt v2 custom logic to a workspace member crate [3]
 
-### Documention
+### Documentation
 
-- [ ] Create library usage examples [2]
-      - Scanning
-      - Connecting
-      - Reading data
-      - Writing data
+(none)
 
 ## Done
+
+### Documentation
+
+- [x] Create library usage examples [2]
+      - Scanning (`scan.rs`)
+      - Connecting (`connect.rs`)
+      - Reading data (`read_data.rs`)
+      - Writing data (`write_data.rs`)
+      - Full workflow (`full_workflow.rs`)
 
 ### Hardening
 

@@ -9,6 +9,18 @@ It is able to read:
 * Heart Rate (if paired with trainer)
 
 It is able to write:
-* ERG
-* Resistance
-* Any others? (gradient?)
+* ERG (target power)
+* Resistance (target level)
+* Indoor Bike Simulation (grade, rolling resistance, wind resistance)
+
+## Examples
+
+See [`ble-transport/examples/`](ble-transport/examples/) for runnable examples demonstrating scanning, connecting, reading data, and writing commands.
+
+```sh
+# Compile all examples (no hardware needed)
+make build-examples
+
+# Run a specific example (requires BLE adapter and trainer)
+make run-example-scan
+```
