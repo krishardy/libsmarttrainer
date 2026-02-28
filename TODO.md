@@ -2,13 +2,6 @@
 
 ## TODO
 
-### BLE Transport (ble-transport crate)
-
-- [ ] Build ble-transport crate: async scan/connect/subscribe with tokio::sync::watch channel API [2.1, High, 6h]
-- [ ] Connection state tracking (connecting/connected/disconnected state machine) [2.8, Med, 1h]
-- [ ] Automatic reconnection logic on BLE drop [2.9, Med, 3h]
-- [ ] When in ERG mode, avoid death spiral by monitoring the cadence. If it drops below 40 rpm for 3 seconds, temporarily turn off ERG mode in the trainer until the cadence increases to 85 rpm. Then turn ERG mode back on and ramp the setpoint from 0 to the setpoint over 15 seconds. [2.9a]
-
 ### Hardening
 
 - [ ] Graceful error types: BLE permission denied, trainer not found, characteristic missing [4.4, High, 2h]
@@ -25,6 +18,15 @@
 
 ## Done
 
+### BLE Transport (ble-transport crate)
+
+- [x] Automatic reconnection logic on BLE drop with exponential backoff, address matching, and control command restoration [2.9]
+- [x] ERG death spiral protection: suspend ERG when cadence < 40 RPM for 3s, ramp from 0 to target over 15s after recovery to 85 RPM [2.9a]
+
+### BLE Transport (ble-transport crate) — earlier
+
+- [x] Build ble-transport crate: async scan/connect/subscribe with tokio::sync::watch channel API [2.1, High, 6h]
+- [x] Connection state tracking (connecting/connected/disconnected state machine) [2.8, Med, 1h]
 
 ### FTMS Protocol (ftms-parser crate)
 

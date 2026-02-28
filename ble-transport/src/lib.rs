@@ -23,6 +23,7 @@ pub enum ConnectionState {
     Disconnected,
     Connecting,
     Connected,
+    Reconnecting,
 }
 
 /// Latest data received from a connected trainer.
@@ -40,6 +41,9 @@ impl Default for TrainerData {
         }
     }
 }
+
+/// Type alias for the trainer data receiver (watch channel).
+pub type TrainerDataReceiver = tokio::sync::watch::Receiver<TrainerData>;
 
 /// Create a `tokio::sync::watch` channel pair for streaming trainer data.
 ///
@@ -68,6 +72,8 @@ mod tests {
     fn connection_state_equality() {
         assert_eq!(ConnectionState::Connected, ConnectionState::Connected);
         assert_ne!(ConnectionState::Connecting, ConnectionState::Disconnected);
+        assert_eq!(ConnectionState::Reconnecting, ConnectionState::Reconnecting);
+        assert_ne!(ConnectionState::Reconnecting, ConnectionState::Connected);
     }
 
     #[test]

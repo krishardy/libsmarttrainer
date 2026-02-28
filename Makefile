@@ -1,4 +1,4 @@
-.PHONY: build test test-ftms test-ble clippy clean coverage coverage-ble
+.PHONY: build test test-ftms test-ble test-safety clippy clean coverage coverage-ble
 
 build:
 	cargo build --workspace
@@ -12,11 +12,14 @@ test-ftms:
 test-ble:
 	cargo test -p ble-transport
 
+test-safety:
+	cargo test -p safety
+
 clippy:
 	cargo clippy --workspace -- -D warnings
 
 coverage:
-	cargo tarpaulin -p ftms-parser -p ble-transport --out Stdout
+	cargo tarpaulin -p ftms-parser -p ble-transport -p safety --out Stdout
 
 coverage-ble:
 	cargo tarpaulin -p ble-transport --exclude-files "ble-transport/src/traits.rs" --exclude-files "ftms-parser/src/lib.rs" --out Stdout

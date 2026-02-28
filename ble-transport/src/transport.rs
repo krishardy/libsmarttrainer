@@ -1,6 +1,9 @@
 use btleplug::api::ValueNotification;
+use ftms_parser::IndoorBikeData;
 use futures::stream::StreamExt;
-use log::{error, warn};
+use log::{error, info, warn};
+use safety::erg_safety::ErgSafetyMonitor;
+use std::time::Instant;
 use tokio::sync::{mpsc, watch};
 
 use crate::commands::TrainerCommand;
@@ -19,33 +22,37 @@ pub(crate) enum LoopAction {
 
 /// Handle a notification from the BLE peripheral.
 ///
-/// Returns `LoopAction::Break` when the notification stream has ended.
+/// Returns `(LoopAction, Option<IndoorBikeData>)`. The `LoopAction::Break`
+/// signals that the notification stream has ended. The `IndoorBikeData` is
+/// returned when a valid bike data notification is parsed, so the caller can
+/// feed cadence to the safety monitor.
 pub(crate) fn handle_notification(
     notification: Option<ValueNotification>,
     data_tx: &watch::Sender<TrainerData>,
-) -> LoopAction {
+) -> (LoopAction, Option<IndoorBikeData>) {
     match notification {
         Some(notif) if notif.uuid == INDOOR_BIKE_DATA_UUID => {
             match ftms_parser::parse_indoor_bike_data(&notif.value) {
                 Ok(bike_data) => {
                     let _ = data_tx.send(TrainerData {
                         connection_state: ConnectionState::Connected,
-                        bike_data: Some(bike_data),
+                        bike_data: Some(bike_data.clone()),
                     });
+                    (LoopAction::Continue, Some(bike_data))
                 }
                 Err(e) => {
                     warn!("Failed to parse indoor bike data: {:?}", e);
+                    (LoopAction::Continue, None)
                 }
             }
-            LoopAction::Continue
         }
-        Some(_) => LoopAction::Continue,
+        Some(_) => (LoopAction::Continue, None),
         None => {
             let _ = data_tx.send(TrainerData {
                 connection_state: ConnectionState::Disconnected,
                 bike_data: None,
             });
-            LoopAction::Break
+            (LoopAction::Break, None)
         }
     }
 }
@@ -131,23 +138,64 @@ pub async fn connect_to_trainer<P: BlePeripheral>(
     };
 
     let join_handle = tokio::spawn(async move {
+        let mut erg_monitor = ErgSafetyMonitor::new();
+        let mut ramp_interval = tokio::time::interval(std::time::Duration::from_millis(500));
+        ramp_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
         loop {
             tokio::select! {
                 notification = notification_stream.next() => {
-                    if handle_notification(notification, &data_tx) == LoopAction::Break {
+                    let (action, bike_data) = handle_notification(notification, &data_tx);
+                    if action == LoopAction::Break {
                         break;
+                    }
+                    // Feed cadence to the safety monitor.
+                    if let Some(ref bd) = bike_data {
+                        let now = Instant::now();
+                        if let Some(power) = erg_monitor.on_cadence_update(bd.instantaneous_cadence_rpm, now) {
+                            info!("ERG safety override: sending power {power}W");
+                            let cmd = TrainerCommand::SetTargetPower(power);
+                            if let Some(bytes) = cmd.serialize()
+                                && let Err(e) = connection.write_control_command(
+                                    &bytes,
+                                    &mut notification_stream,
+                                ).await
+                            {
+                                error!("ERG safety write error: {e}");
+                            }
+                        }
                     }
                 }
                 command = command_rx.recv() => {
                     match command {
                         Some(TrainerCommand::Disconnect) => {
+                            erg_monitor.on_non_erg_command();
                             if let Err(e) = connection.disconnect().await {
                                 error!("Disconnect error: {e}");
                             }
                             send_disconnected(&data_tx);
                             break;
                         }
+                        Some(TrainerCommand::SetTargetPower(watts)) => {
+                            let now = Instant::now();
+                            let actual = erg_monitor.on_set_target_power(watts, now);
+                            let cmd = TrainerCommand::SetTargetPower(actual);
+                            if let Some(bytes) = cmd.serialize()
+                                && let Err(e) = connection.write_control_command(
+                                    &bytes,
+                                    &mut notification_stream,
+                                ).await
+                            {
+                                error!("Control command error: {e}");
+                            }
+                        }
                         Some(cmd) => {
+                            // Non-ERG command — deactivate ERG safety.
+                            if matches!(cmd, TrainerCommand::SetTargetResistance(_)
+                                | TrainerCommand::SetIndoorBikeSimulation { .. })
+                            {
+                                erg_monitor.on_non_erg_command();
+                            }
                             if let Some(bytes) = cmd.serialize()
                                 && let Err(e) = connection.write_control_command(
                                     &bytes,
@@ -159,6 +207,21 @@ pub async fn connect_to_trainer<P: BlePeripheral>(
                         }
                         None => {
                             break;
+                        }
+                    }
+                }
+                _ = ramp_interval.tick(), if erg_monitor.needs_tick() => {
+                    let now = Instant::now();
+                    if let Some(power) = erg_monitor.on_ramp_tick(now) {
+                        info!("ERG ramp tick: sending power {power}W");
+                        let cmd = TrainerCommand::SetTargetPower(power);
+                        if let Some(bytes) = cmd.serialize()
+                            && let Err(e) = connection.write_control_command(
+                                &bytes,
+                                &mut notification_stream,
+                            ).await
+                        {
+                            error!("ERG ramp write error: {e}");
                         }
                     }
                 }
@@ -640,8 +703,10 @@ mod tests {
     fn handle_notification_bike_data() {
         let (data_tx, data_rx) = crate::trainer_data_channel();
         let notif = Some(bike_data_notification(2500, 180, 200));
-        let action = handle_notification(notif, &data_tx);
+        let (action, bike_data) = handle_notification(notif, &data_tx);
         assert_eq!(action, LoopAction::Continue);
+        assert!(bike_data.is_some());
+        assert_eq!(bike_data.unwrap().instantaneous_power_watts, Some(200));
         let data = data_rx.borrow();
         assert_eq!(data.connection_state, ConnectionState::Connected);
         assert_eq!(data.bike_data.as_ref().unwrap().instantaneous_power_watts, Some(200));
@@ -654,8 +719,9 @@ mod tests {
             uuid: INDOOR_BIKE_DATA_UUID,
             value: vec![0x00], // Too short to parse
         });
-        let action = handle_notification(notif, &data_tx);
+        let (action, bike_data) = handle_notification(notif, &data_tx);
         assert_eq!(action, LoopAction::Continue);
+        assert!(bike_data.is_none());
         // State should not change on parse error.
         assert_eq!(data_rx.borrow().connection_state, ConnectionState::Disconnected);
     }
@@ -667,16 +733,18 @@ mod tests {
             uuid: FITNESS_MACHINE_STATUS_UUID,
             value: vec![0x01],
         });
-        let action = handle_notification(notif, &data_tx);
+        let (action, bike_data) = handle_notification(notif, &data_tx);
         assert_eq!(action, LoopAction::Continue);
+        assert!(bike_data.is_none());
         assert_eq!(data_rx.borrow().connection_state, ConnectionState::Disconnected);
     }
 
     #[test]
     fn handle_notification_stream_ended() {
         let (data_tx, data_rx) = crate::trainer_data_channel();
-        let action = handle_notification(None, &data_tx);
+        let (action, bike_data) = handle_notification(None, &data_tx);
         assert_eq!(action, LoopAction::Break);
+        assert!(bike_data.is_none());
         assert_eq!(data_rx.borrow().connection_state, ConnectionState::Disconnected);
     }
 
