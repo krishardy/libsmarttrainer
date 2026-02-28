@@ -22,6 +22,10 @@ Transport tests that spawn background tasks via `tokio::spawn` use `#[tokio::tes
 
 The `Disconnect` variant does not correspond to an FTMS control point op code. It is handled at the transport layer (disconnect the peripheral and update state) rather than being serialized and written.
 
+## Service discovery retry with disconnect/reconnect
+
+`connect_and_setup()` retries `discover_services()` up to 3 times. On failure, it disconnects and reconnects before retrying because BlueZ leaves the BLE connection in an indeterminate state after a discovery timeout. This mirrors the existing `request_control_with_retry` pattern. Tests use a `DiscoveryFailPeripheral` wrapper mock that delegates to `TestPeripheral` while injecting a configurable number of `TimedOut` errors.
+
 ## Scanner returns (DiscoveredDevice, Peripheral) tuples
 
 `scan_for_ftms_devices()` returns metadata alongside the peripheral so consumers can present device info to the user before passing the peripheral to `connect_to_trainer()`. This avoids coupling scanner and connection modules.

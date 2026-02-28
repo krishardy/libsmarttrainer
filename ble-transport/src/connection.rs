@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use btleplug::api::{Characteristic, ValueNotification, WriteType};
 use futures::stream::{Stream, StreamExt};
-use log::info;
+use log::{info, warn};
 use tokio::sync::watch;
 
 use crate::constants::{
@@ -59,11 +59,33 @@ impl<P: BlePeripheral> FtmsConnection<P> {
             bike_data: None,
         });
 
-        // Step 1: Connect.
+        // Steps 1-2: Connect and discover services, with retry on discovery failure.
         self.peripheral.connect().await?;
 
-        // Step 2: Discover services.
-        self.peripheral.discover_services().await?;
+        let mut last_discovery_err = None;
+        for attempt in 1..=DISCOVER_SERVICES_MAX_ATTEMPTS {
+            match self.peripheral.discover_services().await {
+                Ok(()) => {
+                    last_discovery_err = None;
+                    break;
+                }
+                Err(e) if attempt < DISCOVER_SERVICES_MAX_ATTEMPTS => {
+                    warn!(
+                        "Service discovery failed (attempt {attempt}/{DISCOVER_SERVICES_MAX_ATTEMPTS}): {e}, retrying..."
+                    );
+                    last_discovery_err = Some(e);
+                    // Disconnect and reconnect before retrying.
+                    let _ = self.peripheral.disconnect().await;
+                    self.peripheral.connect().await?;
+                }
+                Err(e) => {
+                    last_discovery_err = Some(e);
+                }
+            }
+        }
+        if let Some(e) = last_discovery_err {
+            return Err(e.into());
+        }
 
         // Step 3: Find characteristics.
         let chars = self.peripheral.characteristics();
@@ -152,6 +174,9 @@ pub fn find_characteristic(
         .cloned()
         .ok_or_else(|| BleTransportError::CharacteristicNotFound(uuid.to_string()))
 }
+
+/// Maximum number of attempts for service discovery.
+const DISCOVER_SERVICES_MAX_ATTEMPTS: u32 = 3;
 
 /// Maximum number of attempts for the Request Control handshake.
 const REQUEST_CONTROL_MAX_ATTEMPTS: u32 = 3;
@@ -870,5 +895,109 @@ mod tests {
         let peripheral = TestPeripheral::new(config);
         let conn = FtmsConnection::new(peripheral);
         conn.disconnect().await.unwrap();
+    }
+
+    // --- Service discovery retry tests ---
+
+    /// Mock peripheral that wraps `TestPeripheral` and fails `discover_services()`
+    /// a configurable number of times before succeeding.
+    struct DiscoveryFailPeripheral {
+        inner: TestPeripheral,
+        fail_count: u32,
+        attempt: Mutex<u32>,
+    }
+
+    impl DiscoveryFailPeripheral {
+        fn new(config: MockPeripheralConfig, fail_count: u32) -> Self {
+            Self {
+                inner: TestPeripheral::new(config),
+                fail_count,
+                attempt: Mutex::new(0),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl BlePeripheral for DiscoveryFailPeripheral {
+        async fn connect(&self) -> std::result::Result<(), btleplug::Error> {
+            self.inner.connect().await
+        }
+        async fn disconnect(&self) -> std::result::Result<(), btleplug::Error> {
+            self.inner.disconnect().await
+        }
+        async fn is_connected(&self) -> std::result::Result<bool, btleplug::Error> {
+            self.inner.is_connected().await
+        }
+        async fn discover_services(&self) -> std::result::Result<(), btleplug::Error> {
+            let mut attempt = self.attempt.lock().unwrap();
+            *attempt += 1;
+            if *attempt <= self.fail_count {
+                Err(btleplug::Error::TimedOut(Duration::from_secs(30)))
+            } else {
+                Ok(())
+            }
+        }
+        fn characteristics(&self) -> BTreeSet<Characteristic> {
+            self.inner.characteristics()
+        }
+        fn services(&self) -> BTreeSet<Service> {
+            self.inner.services()
+        }
+        async fn properties(
+            &self,
+        ) -> std::result::Result<Option<PeripheralProperties>, btleplug::Error> {
+            self.inner.properties().await
+        }
+        async fn read(
+            &self,
+            characteristic: &Characteristic,
+        ) -> std::result::Result<Vec<u8>, btleplug::Error> {
+            self.inner.read(characteristic).await
+        }
+        async fn write(
+            &self,
+            characteristic: &Characteristic,
+            data: &[u8],
+            write_type: WriteType,
+        ) -> std::result::Result<(), btleplug::Error> {
+            self.inner.write(characteristic, data, write_type).await
+        }
+        async fn subscribe(
+            &self,
+            characteristic: &Characteristic,
+        ) -> std::result::Result<(), btleplug::Error> {
+            self.inner.subscribe(characteristic).await
+        }
+        async fn notifications(
+            &self,
+        ) -> std::result::Result<
+            Pin<Box<dyn futures::Stream<Item = ValueNotification> + Send>>,
+            btleplug::Error,
+        > {
+            self.inner.notifications().await
+        }
+    }
+
+    #[tokio::test]
+    async fn discover_services_retries_on_failure() {
+        let config = MockPeripheralConfig::default();
+        let peripheral = DiscoveryFailPeripheral::new(config, 1); // Fail first, succeed second.
+        let mut conn = FtmsConnection::new(peripheral);
+        let (tx, rx) = crate::trainer_data_channel();
+
+        let result = conn.connect_and_setup(&tx).await;
+        assert!(result.is_ok(), "Expected success after retry");
+        assert_eq!(rx.borrow().connection_state, ConnectionState::Connected);
+    }
+
+    #[tokio::test]
+    async fn discover_services_all_attempts_fail() {
+        let config = MockPeripheralConfig::default();
+        let peripheral = DiscoveryFailPeripheral::new(config, DISCOVER_SERVICES_MAX_ATTEMPTS);
+        let mut conn = FtmsConnection::new(peripheral);
+        let (tx, _rx) = crate::trainer_data_channel();
+
+        let result = conn.connect_and_setup(&tx).await;
+        assert!(matches!(result, Err(BleTransportError::Btleplug(_))));
     }
 }
