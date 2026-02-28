@@ -7,6 +7,7 @@
 - [ ] Build ble-transport crate: async scan/connect/subscribe with tokio::sync::watch channel API [2.1, High, 6h]
 - [ ] Connection state tracking (connecting/connected/disconnected state machine) [2.8, Med, 1h]
 - [ ] Automatic reconnection logic on BLE drop [2.9, Med, 3h]
+- [ ] When in ERG mode, avoid death spiral by monitoring the cadence. If it drops below 40 rpm for 3 seconds, temporarily turn off ERG mode in the trainer until the cadence increases to 85 rpm. Then turn ERG mode back on and ramp the setpoint from 0 to the setpoint over 15 seconds. [2.9a]
 
 ### Hardening
 
