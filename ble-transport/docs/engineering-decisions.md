@@ -24,7 +24,7 @@ The `Disconnect` variant does not correspond to an FTMS control point op code. I
 
 ## Service discovery retry with disconnect/reconnect
 
-`connect_and_setup()` retries `discover_services()` up to 3 times. On failure, it disconnects and reconnects before retrying because BlueZ leaves the BLE connection in an indeterminate state after a discovery timeout. This mirrors the existing `request_control_with_retry` pattern. Tests use a `DiscoveryFailPeripheral` wrapper mock that delegates to `TestPeripheral` while injecting a configurable number of `TimedOut` errors.
+`connect_and_setup()` retries the entire connect + discover sequence up to 3 times via a `connect_and_discover()` helper. On Linux/BlueZ, btleplug's `connect()` internally calls `bluez-async`'s `connect_with_timeout()`, which runs `await_service_discovery()` after the BLE link is established. A "Service discovery timed out" error therefore surfaces from `connect()`, not `discover_services()`. The error is a `bluez_async::BluetoothError::ServiceDiscoveryTimedOut` wrapped as `btleplug::Error::Other(Box<dyn Error>)`. The retry loop wraps both `connect()` and `discover_services()` so that either failure triggers a disconnect and retry. Tests use a `ConnectFailPeripheral` wrapper mock that fails `connect()` a configurable number of times to simulate the real-world error path.
 
 ## Scanner returns (DiscoveredDevice, Peripheral) tuples
 

@@ -6,7 +6,7 @@
 
 - [ ] Multiple trainer support (handle >1 FTMS device in range) [Low, 2h]
 - [ ] Trainer-specific quirk testing and workarounds [4.7, Med, 4h]
-- [ ] Move any JetBlack Volt v2 code to a workspace member crate
+- [ ] Move any JetBlack Volt v2 code to a workspace member crate [3]
 
 ### Documention
 

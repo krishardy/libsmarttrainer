@@ -60,31 +60,31 @@ impl<P: BlePeripheral> FtmsConnection<P> {
             bike_data: None,
         });
 
-        // Steps 1-2: Connect and discover services, with retry on discovery failure.
-        self.peripheral.connect().await?;
-
-        let mut last_discovery_err = None;
+        // Steps 1-2: Connect and discover services, with retry.
+        // On Linux/BlueZ, btleplug's connect() internally triggers service
+        // discovery via bluez-async. A "Service discovery timed out" error
+        // surfaces from connect(), not discover_services(). We therefore
+        // retry the entire connect + discover_services sequence.
+        let mut last_err: Option<btleplug::Error> = None;
         for attempt in 1..=DISCOVER_SERVICES_MAX_ATTEMPTS {
-            match self.peripheral.discover_services().await {
+            match self.connect_and_discover().await {
                 Ok(()) => {
-                    last_discovery_err = None;
+                    last_err = None;
                     break;
                 }
                 Err(e) if attempt < DISCOVER_SERVICES_MAX_ATTEMPTS => {
                     warn!(
-                        "Service discovery failed (attempt {attempt}/{DISCOVER_SERVICES_MAX_ATTEMPTS}): {e}, retrying..."
+                        "Connect/discover failed (attempt {attempt}/{DISCOVER_SERVICES_MAX_ATTEMPTS}): {e}, retrying..."
                     );
-                    last_discovery_err = Some(e);
-                    // Disconnect and reconnect before retrying.
+                    last_err = Some(e);
                     let _ = self.peripheral.disconnect().await;
-                    self.peripheral.connect().await?;
                 }
                 Err(e) => {
-                    last_discovery_err = Some(e);
+                    last_err = Some(e);
                 }
             }
         }
-        if let Some(e) = last_discovery_err {
+        if let Some(e) = last_err {
             return Err(e.into());
         }
 
@@ -140,6 +140,16 @@ impl<P: BlePeripheral> FtmsConnection<P> {
         });
 
         Ok(stream)
+    }
+
+    /// Connect to the peripheral and discover services.
+    ///
+    /// On Linux/BlueZ, `connect()` internally triggers service discovery.
+    /// This helper combines both steps so they can be retried together.
+    async fn connect_and_discover(&self) -> std::result::Result<(), btleplug::Error> {
+        self.peripheral.connect().await?;
+        self.peripheral.discover_services().await?;
+        Ok(())
     }
 
     /// Write a control command to the FTMS Control Point and wait for indication.
@@ -915,28 +925,43 @@ mod tests {
 
     // --- Service discovery retry tests ---
 
-    /// Mock peripheral that wraps `TestPeripheral` and fails `discover_services()`
-    /// a configurable number of times before succeeding.
-    struct DiscoveryFailPeripheral {
+    /// Mock peripheral that wraps `TestPeripheral` and fails `connect()`
+    /// a configurable number of times before succeeding. This simulates
+    /// the real-world case where btleplug's `connect()` fails with
+    /// "Service discovery timed out" from bluez-async.
+    struct ConnectFailPeripheral {
         inner: TestPeripheral,
-        fail_count: u32,
-        attempt: Mutex<u32>,
+        connect_fail_count: u32,
+        connect_attempt: Mutex<u32>,
     }
 
-    impl DiscoveryFailPeripheral {
-        fn new(config: MockPeripheralConfig, fail_count: u32) -> Self {
+    impl ConnectFailPeripheral {
+        fn new(config: MockPeripheralConfig, connect_fail_count: u32) -> Self {
             Self {
                 inner: TestPeripheral::new(config),
-                fail_count,
-                attempt: Mutex::new(0),
+                connect_fail_count,
+                connect_attempt: Mutex::new(0),
             }
         }
     }
 
     #[async_trait]
-    impl BlePeripheral for DiscoveryFailPeripheral {
+    impl BlePeripheral for ConnectFailPeripheral {
         async fn connect(&self) -> std::result::Result<(), btleplug::Error> {
-            self.inner.connect().await
+            let should_fail = {
+                let mut attempt = self.connect_attempt.lock().unwrap();
+                *attempt += 1;
+                *attempt <= self.connect_fail_count
+            };
+            if should_fail {
+                // Simulate bluez-async ServiceDiscoveryTimedOut wrapped as
+                // btleplug::Error::Other, which is what happens in production.
+                Err(btleplug::Error::Other(
+                    "Service discovery timed out".into(),
+                ))
+            } else {
+                self.inner.connect().await
+            }
         }
         async fn disconnect(&self) -> std::result::Result<(), btleplug::Error> {
             self.inner.disconnect().await
@@ -945,13 +970,7 @@ mod tests {
             self.inner.is_connected().await
         }
         async fn discover_services(&self) -> std::result::Result<(), btleplug::Error> {
-            let mut attempt = self.attempt.lock().unwrap();
-            *attempt += 1;
-            if *attempt <= self.fail_count {
-                Err(btleplug::Error::TimedOut(Duration::from_secs(30)))
-            } else {
-                Ok(())
-            }
+            self.inner.discover_services().await
         }
         fn characteristics(&self) -> BTreeSet<Characteristic> {
             self.inner.characteristics()
@@ -995,9 +1014,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn discover_services_retries_on_failure() {
+    async fn connect_retries_on_service_discovery_timeout() {
         let config = MockPeripheralConfig::default();
-        let peripheral = DiscoveryFailPeripheral::new(config, 1); // Fail first, succeed second.
+        let peripheral = ConnectFailPeripheral::new(config, 1); // Fail first connect, succeed second.
         let mut conn = FtmsConnection::new(peripheral);
         let (tx, rx) = crate::trainer_data_channel();
 
@@ -1031,9 +1050,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn discover_services_all_attempts_fail() {
+    async fn connect_all_attempts_fail() {
         let config = MockPeripheralConfig::default();
-        let peripheral = DiscoveryFailPeripheral::new(config, DISCOVER_SERVICES_MAX_ATTEMPTS);
+        let peripheral = ConnectFailPeripheral::new(config, DISCOVER_SERVICES_MAX_ATTEMPTS);
         let mut conn = FtmsConnection::new(peripheral);
         let (tx, _rx) = crate::trainer_data_channel();
 
