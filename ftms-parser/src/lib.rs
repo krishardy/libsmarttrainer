@@ -116,9 +116,9 @@ pub enum ParseError {
 pub mod control_point {
     pub const REQUEST_CONTROL: u8 = 0x00;
     pub const RESET: u8 = 0x01;
-    pub const SET_TARGET_INCLINATION: u8 = 0x03;
     pub const SET_TARGET_RESISTANCE: u8 = 0x04;
     pub const SET_TARGET_POWER: u8 = 0x05;
+    pub const SET_INDOOR_BIKE_SIMULATION: u8 = 0x11;
     pub const RESPONSE_CODE: u8 = 0x80;
 }
 
@@ -285,14 +285,31 @@ pub fn serialize_control_point_set_target_resistance(level: u8) -> [u8; 2] {
     [control_point::SET_TARGET_RESISTANCE, level]
 }
 
-/// Serialize a Fitness Machine Control Point "Set Target Inclination" command
-/// (op code 0x03).
+/// Serialize a Fitness Machine Control Point "Set Indoor Bike Simulation"
+/// command (op code 0x11).
 ///
-/// `inclination_01_pct` is the raw sint16 value with 0.1% resolution (caller
-/// applies scaling).
-pub fn serialize_control_point_set_target_inclination(inclination_01_pct: i16) -> [u8; 3] {
-    let bytes = inclination_01_pct.to_le_bytes();
-    [control_point::SET_TARGET_INCLINATION, bytes[0], bytes[1]]
+/// Parameters:
+/// - `wind_speed_001_mps`: wind speed in 0.001 m/s resolution (sint16)
+/// - `grade_001_pct`: grade in 0.01% resolution (sint16)
+/// - `crr_0001`: rolling resistance coefficient in 0.0001 resolution (uint8)
+/// - `cw_001_kgm`: wind resistance coefficient in 0.01 kg/m resolution (uint8)
+pub fn serialize_control_point_set_indoor_bike_simulation(
+    wind_speed_001_mps: i16,
+    grade_001_pct: i16,
+    crr_0001: u8,
+    cw_001_kgm: u8,
+) -> [u8; 7] {
+    let wind = wind_speed_001_mps.to_le_bytes();
+    let grade = grade_001_pct.to_le_bytes();
+    [
+        control_point::SET_INDOOR_BIKE_SIMULATION,
+        wind[0],
+        wind[1],
+        grade[0],
+        grade[1],
+        crr_0001,
+        cw_001_kgm,
+    ]
 }
 
 /// Parse a Fitness Machine Control Point indication response.
@@ -502,20 +519,30 @@ mod tests {
     }
 
     #[test]
-    fn serialize_set_target_inclination_3_0_pct() {
-        // 3.0% at 0.1% resolution = raw value 30 (0x1E)
-        assert_eq!(
-            serialize_control_point_set_target_inclination(30),
-            [0x03, 0x1E, 0x00]
-        );
+    fn serialize_indoor_bike_simulation_zero_grade() {
+        let bytes = serialize_control_point_set_indoor_bike_simulation(0, 0, 40, 51);
+        assert_eq!(bytes, [0x11, 0x00, 0x00, 0x00, 0x00, 40, 51]);
     }
 
     #[test]
-    fn serialize_set_target_inclination_negative() {
-        let bytes = serialize_control_point_set_target_inclination(-20);
-        let raw = i16::from_le_bytes([bytes[1], bytes[2]]);
-        assert_eq!(raw, -20);
-        assert_eq!(bytes[0], control_point::SET_TARGET_INCLINATION);
+    fn serialize_indoor_bike_simulation_positive_grade() {
+        // 5.0% at 0.01% resolution = 500
+        let bytes = serialize_control_point_set_indoor_bike_simulation(0, 500, 40, 51);
+        assert_eq!(bytes[0], 0x11);
+        // wind = 0
+        assert_eq!(i16::from_le_bytes([bytes[1], bytes[2]]), 0);
+        // grade = 500
+        assert_eq!(i16::from_le_bytes([bytes[3], bytes[4]]), 500);
+        assert_eq!(bytes[5], 40);
+        assert_eq!(bytes[6], 51);
+    }
+
+    #[test]
+    fn serialize_indoor_bike_simulation_negative_grade() {
+        // -3.0% at 0.01% resolution = -300
+        let bytes = serialize_control_point_set_indoor_bike_simulation(0, -300, 40, 51);
+        assert_eq!(bytes[0], control_point::SET_INDOOR_BIKE_SIMULATION);
+        assert_eq!(i16::from_le_bytes([bytes[3], bytes[4]]), -300);
     }
 
     #[test]
@@ -742,13 +769,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn serialize_set_target_inclination_zero() {
-        assert_eq!(
-            serialize_control_point_set_target_inclination(0),
-            [0x03, 0x00, 0x00]
-        );
-    }
 
     // ---------------------------------------------------------------
     // Real-device test vectors: JetBlack Volt V2

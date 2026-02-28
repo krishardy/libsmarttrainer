@@ -5,8 +5,15 @@ pub enum TrainerCommand {
     SetTargetPower(i16),
     /// Set target resistance level (raw uint8, 0.1 resolution).
     SetTargetResistance(u8),
-    /// Set target inclination (raw sint16, 0.1% resolution).
-    SetTargetInclination(i16),
+    /// Set indoor bike simulation parameters.
+    SetIndoorBikeSimulation {
+        /// Grade in 0.01% resolution (sint16).
+        grade_001_pct: i16,
+        /// Rolling resistance coefficient (uint8, 0.0001 resolution).
+        crr: u8,
+        /// Wind resistance coefficient (uint8, 0.01 kg/m resolution).
+        cw: u8,
+    },
     /// Reset the trainer.
     Reset,
     /// Disconnect from the trainer.
@@ -26,8 +33,11 @@ impl TrainerCommand {
             TrainerCommand::SetTargetResistance(level) => {
                 Some(ftms_parser::serialize_control_point_set_target_resistance(*level).to_vec())
             }
-            TrainerCommand::SetTargetInclination(inclination) => Some(
-                ftms_parser::serialize_control_point_set_target_inclination(*inclination).to_vec(),
+            TrainerCommand::SetIndoorBikeSimulation { grade_001_pct, crr, cw } => Some(
+                ftms_parser::serialize_control_point_set_indoor_bike_simulation(
+                    0, *grade_001_pct, *crr, *cw,
+                )
+                .to_vec(),
             ),
             TrainerCommand::Reset => {
                 Some(ftms_parser::serialize_control_point_reset().to_vec())
@@ -65,19 +75,32 @@ mod tests {
     }
 
     #[test]
-    fn serialize_set_target_inclination() {
-        let cmd = TrainerCommand::SetTargetInclination(30);
+    fn serialize_set_indoor_bike_simulation() {
+        let cmd = TrainerCommand::SetIndoorBikeSimulation {
+            grade_001_pct: 500,
+            crr: 40,
+            cw: 51,
+        };
         let bytes = cmd.serialize().unwrap();
-        assert_eq!(bytes, vec![0x03, 0x1E, 0x00]);
+        assert_eq!(bytes[0], 0x11);
+        // wind = 0
+        assert_eq!(i16::from_le_bytes([bytes[1], bytes[2]]), 0);
+        // grade = 500
+        assert_eq!(i16::from_le_bytes([bytes[3], bytes[4]]), 500);
+        assert_eq!(bytes[5], 40);
+        assert_eq!(bytes[6], 51);
     }
 
     #[test]
-    fn serialize_set_target_inclination_negative() {
-        let cmd = TrainerCommand::SetTargetInclination(-20);
+    fn serialize_set_indoor_bike_simulation_negative_grade() {
+        let cmd = TrainerCommand::SetIndoorBikeSimulation {
+            grade_001_pct: -300,
+            crr: 40,
+            cw: 51,
+        };
         let bytes = cmd.serialize().unwrap();
-        assert_eq!(bytes[0], 0x03);
-        let raw = i16::from_le_bytes([bytes[1], bytes[2]]);
-        assert_eq!(raw, -20);
+        assert_eq!(bytes[0], 0x11);
+        assert_eq!(i16::from_le_bytes([bytes[3], bytes[4]]), -300);
     }
 
     #[test]

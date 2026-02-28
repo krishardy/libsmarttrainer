@@ -82,10 +82,15 @@ impl TrainerHandle {
             .await
     }
 
-    /// Set the target inclination (raw sint16, 0.1% resolution).
-    pub async fn set_target_inclination(&self, inclination: i16) -> std::result::Result<(), mpsc::error::SendError<TrainerCommand>> {
+    /// Set indoor bike simulation parameters.
+    pub async fn set_indoor_bike_simulation(
+        &self,
+        grade_001_pct: i16,
+        crr: u8,
+        cw: u8,
+    ) -> std::result::Result<(), mpsc::error::SendError<TrainerCommand>> {
         self.command_tx
-            .send(TrainerCommand::SetTargetInclination(inclination))
+            .send(TrainerCommand::SetIndoorBikeSimulation { grade_001_pct, crr, cw })
             .await
     }
 
@@ -572,16 +577,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn trainer_handle_set_target_inclination() {
+    async fn trainer_handle_set_indoor_bike_simulation() {
         let (tx, mut rx) = mpsc::channel(1);
         let (_data_tx, data_rx) = crate::trainer_data_channel();
         let handle = TrainerHandle {
             command_tx: tx,
             data_rx,
         };
-        handle.set_target_inclination(-20).await.unwrap();
+        handle.set_indoor_bike_simulation(-300, 40, 51).await.unwrap();
         let cmd = rx.recv().await.unwrap();
-        assert_eq!(cmd, TrainerCommand::SetTargetInclination(-20));
+        assert_eq!(cmd, TrainerCommand::SetIndoorBikeSimulation {
+            grade_001_pct: -300,
+            crr: 40,
+            cw: 51,
+        });
     }
 
     #[tokio::test]
