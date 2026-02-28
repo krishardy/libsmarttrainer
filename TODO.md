@@ -4,7 +4,6 @@
 
 ### Hardening
 
-- [ ] Graceful error types: BLE permission denied, trainer not found, characteristic missing [4.4, High, 2h]
 - [ ] Multiple trainer support (handle >1 FTMS device in range) [4.5, Low, 2h]
 - [ ] Trainer-specific quirk testing and workarounds [4.7, Med, 4h]
 
@@ -17,6 +16,10 @@
       - Writing data
 
 ## Done
+
+### Hardening
+
+- [x] Graceful error types: PermissionDenied variant, Display for ParseError, user_message() with recovery hints on BleTransportError [4.4]
 
 ### BLE Transport (ble-transport crate)
 

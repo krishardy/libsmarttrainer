@@ -12,13 +12,16 @@ pub enum BleTransportError {
     #[error("characteristic {0} not found")]
     CharacteristicNotFound(String),
 
+    #[error("Bluetooth permission denied")]
+    PermissionDenied,
+
     #[error("BLE error: {0}")]
-    Btleplug(#[from] btleplug::Error),
+    Btleplug(btleplug::Error),
 
     #[error("control point rejected: {0:?}")]
     ControlPointRejected(ControlPointResponse),
 
-    #[error("parse error: {0:?}")]
+    #[error("parse error: {0}")]
     Parse(ParseError),
 
     #[error("control point response timed out")]
@@ -31,9 +34,56 @@ pub enum BleTransportError {
     NotConnected,
 }
 
+impl From<btleplug::Error> for BleTransportError {
+    fn from(e: btleplug::Error) -> Self {
+        match e {
+            btleplug::Error::PermissionDenied => BleTransportError::PermissionDenied,
+            other => BleTransportError::Btleplug(other),
+        }
+    }
+}
+
 impl From<ParseError> for BleTransportError {
     fn from(e: ParseError) -> Self {
         BleTransportError::Parse(e)
+    }
+}
+
+impl BleTransportError {
+    /// Return a user-friendly error message with recovery hints.
+    pub fn user_message(&self) -> String {
+        match self {
+            BleTransportError::PermissionDenied => {
+                "Bluetooth permission denied. On Linux, ensure your user is in the 'bluetooth' group.".into()
+            }
+            BleTransportError::NoAdapter => {
+                "No Bluetooth adapter found. Check that Bluetooth is enabled.".into()
+            }
+            BleTransportError::NoDeviceFound => {
+                "No FTMS trainer found. Make sure your trainer is powered on and in range.".into()
+            }
+            BleTransportError::CharacteristicNotFound(_) => {
+                "Required characteristic not found. The device may not support FTMS.".into()
+            }
+            BleTransportError::Timeout => {
+                "Connection timed out. Move closer to the trainer and try again.".into()
+            }
+            BleTransportError::NotConnected => {
+                "Not connected to a trainer. Connect to a device first.".into()
+            }
+            BleTransportError::StreamEnded => {
+                "Lost connection to trainer. The device may have powered off.".into()
+            }
+            BleTransportError::ControlPointRejected(_) => {
+                "Trainer rejected command. The feature may not be supported.".into()
+            }
+            BleTransportError::Parse(e) => {
+                format!("Data parsing error: {e}.")
+            }
+            BleTransportError::Btleplug(e) => {
+                format!("Bluetooth error: {e}")
+            }
+        }
     }
 }
 
@@ -81,6 +131,12 @@ mod tests {
     }
 
     #[test]
+    fn display_permission_denied() {
+        let err = BleTransportError::PermissionDenied;
+        assert_eq!(err.to_string(), "Bluetooth permission denied");
+    }
+
+    #[test]
     fn from_parse_error() {
         let parse_err = ParseError::TooShort;
         let err: BleTransportError = parse_err.into();
@@ -95,6 +151,20 @@ mod tests {
             err,
             BleTransportError::Parse(ParseError::InvalidData)
         ));
+    }
+
+    #[test]
+    fn from_btleplug_permission_denied() {
+        let btl_err = btleplug::Error::PermissionDenied;
+        let err: BleTransportError = btl_err.into();
+        assert!(matches!(err, BleTransportError::PermissionDenied));
+    }
+
+    #[test]
+    fn from_btleplug_other_error() {
+        let btl_err = btleplug::Error::DeviceNotFound;
+        let err: BleTransportError = btl_err.into();
+        assert!(matches!(err, BleTransportError::Btleplug(_)));
     }
 
     #[test]
@@ -114,5 +184,89 @@ mod tests {
         let err = BleTransportError::Parse(ParseError::TooShort);
         let msg = err.to_string();
         assert!(msg.contains("parse error"));
+        // Now uses Display (not Debug), so should show the human message.
+        assert!(msg.contains("data payload too short"));
+    }
+
+    // ── user_message() tests ──────────────────────────────────
+
+    #[test]
+    fn user_message_permission_denied() {
+        let err = BleTransportError::PermissionDenied;
+        let msg = err.user_message();
+        assert!(msg.contains("Bluetooth permission denied"));
+        assert!(msg.contains("bluetooth"));
+    }
+
+    #[test]
+    fn user_message_no_adapter() {
+        let err = BleTransportError::NoAdapter;
+        let msg = err.user_message();
+        assert!(msg.contains("No Bluetooth adapter found"));
+        assert!(msg.contains("enabled"));
+    }
+
+    #[test]
+    fn user_message_no_device_found() {
+        let err = BleTransportError::NoDeviceFound;
+        let msg = err.user_message();
+        assert!(msg.contains("No FTMS trainer found"));
+        assert!(msg.contains("powered on"));
+    }
+
+    #[test]
+    fn user_message_characteristic_not_found() {
+        let err = BleTransportError::CharacteristicNotFound("0x2AD2".into());
+        let msg = err.user_message();
+        assert!(msg.contains("Required characteristic not found"));
+    }
+
+    #[test]
+    fn user_message_timeout() {
+        let err = BleTransportError::Timeout;
+        let msg = err.user_message();
+        assert!(msg.contains("timed out"));
+        assert!(msg.contains("closer"));
+    }
+
+    #[test]
+    fn user_message_not_connected() {
+        let err = BleTransportError::NotConnected;
+        let msg = err.user_message();
+        assert!(msg.contains("Not connected"));
+    }
+
+    #[test]
+    fn user_message_stream_ended() {
+        let err = BleTransportError::StreamEnded;
+        let msg = err.user_message();
+        assert!(msg.contains("Lost connection"));
+    }
+
+    #[test]
+    fn user_message_control_point_rejected() {
+        use ftms_parser::{ControlPointResultCode, ControlPointResponse};
+        let resp = ControlPointResponse {
+            request_op_code: 0x05,
+            result_code: ControlPointResultCode::NotSupported,
+        };
+        let err = BleTransportError::ControlPointRejected(resp);
+        let msg = err.user_message();
+        assert!(msg.contains("rejected"));
+    }
+
+    #[test]
+    fn user_message_parse_error() {
+        let err = BleTransportError::Parse(ParseError::TooShort);
+        let msg = err.user_message();
+        assert!(msg.contains("Data parsing error"));
+        assert!(msg.contains("data payload too short"));
+    }
+
+    #[test]
+    fn user_message_btleplug() {
+        let err = BleTransportError::Btleplug(btleplug::Error::DeviceNotFound);
+        let msg = err.user_message();
+        assert!(msg.contains("Bluetooth error"));
     }
 }

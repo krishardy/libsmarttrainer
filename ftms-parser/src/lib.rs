@@ -112,6 +112,15 @@ pub enum ParseError {
     InvalidData,
 }
 
+impl core::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ParseError::TooShort => write!(f, "data payload too short"),
+            ParseError::InvalidData => write!(f, "invalid or unsupported data format"),
+        }
+    }
+}
+
 /// FTMS Control Point op codes (written to 0x2AD9).
 pub mod control_point {
     pub const REQUEST_CONTROL: u8 = 0x00;
@@ -356,8 +365,28 @@ pub fn parse_feature(data: &[u8]) -> Result<FitnessMachineFeature, ParseError> {
 }
 
 #[cfg(test)]
+extern crate alloc;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::format;
+
+    // ── Display tests ──────────────────────────────────────────
+
+    #[test]
+    fn display_parse_error_too_short() {
+        let err = ParseError::TooShort;
+        assert_eq!(format!("{err}"), "data payload too short");
+    }
+
+    #[test]
+    fn display_parse_error_invalid_data() {
+        let err = ParseError::InvalidData;
+        assert_eq!(format!("{err}"), "invalid or unsupported data format");
+    }
+
+    // ── Parser tests ──────────────────────────────────────────
 
     #[test]
     fn parse_indoor_bike_data_too_short() {
