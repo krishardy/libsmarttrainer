@@ -169,7 +169,7 @@ async fn wait_cp_response(
     stream: &mut Pin<Box<dyn Stream<Item = ValueNotification> + Send>>,
     control_point_uuid: uuid::Uuid,
 ) -> Result<ftms_parser::ControlPointResponse> {
-    let timeout_duration = Duration::from_secs(5);
+    let timeout_duration = Duration::from_secs(10);
     let result = tokio::time::timeout(timeout_duration, async {
         while let Some(notification) = stream.next().await {
             if notification.uuid == control_point_uuid {
