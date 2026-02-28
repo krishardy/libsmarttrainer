@@ -79,7 +79,8 @@ pub(crate) fn handle_notification(
     match notification {
         Some(notif) if notif.uuid == INDOOR_BIKE_DATA_UUID => {
             match ftms_parser::parse_indoor_bike_data(&notif.value) {
-                Ok(bike_data) => {
+                Ok(mut bike_data) => {
+                    trainer_quirks::apply_default_quirks(&mut bike_data);
                     let _ = data_tx.send(TrainerData {
                         connection_state: ConnectionState::Connected,
                         bike_data: Some(bike_data.clone()),

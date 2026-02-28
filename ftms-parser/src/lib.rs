@@ -251,9 +251,7 @@ pub fn parse_indoor_bike_data(data: &[u8]) -> Result<IndoorBikeData, ParseError>
         }
         let hr = data[offset];
         // offset += 1; // not needed, last field we read
-        // HR of 0 is a trainer quirk meaning "not available" (e.g., JetBlack Volt V2
-        // when fully stopped). Physiologically impossible — treat as absent.
-        if hr == 0 { None } else { Some(hr) }
+        Some(hr)
     } else {
         None
     };
@@ -899,24 +897,25 @@ mod tests {
         // Captured from JetBlack Volt V2 via btmon — fully stopped, HR reports 0
         // 0x2AD2 Indoor Bike Data notification (t≈207s in capture)
         // Demonstrates trainer quirk: heart_rate_bpm=0 when fully stopped.
-        // HR=0 is filtered to None (physiologically impossible, means "not available").
+        // Parser returns raw Some(0); trainer-quirks crate filters to None.
         let data = [0x64, 0x02, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00];
         let result = parse_indoor_bike_data(&data).unwrap();
         assert!((result.instantaneous_speed_kmh.unwrap()).abs() < 0.01);
         assert!((result.instantaneous_cadence_rpm.unwrap()).abs() < 0.1);
         assert_eq!(result.instantaneous_power_watts, Some(0));
-        assert_eq!(result.heart_rate_bpm, None);
+        assert_eq!(result.heart_rate_bpm, Some(0));
     }
 
     #[test]
-    fn parse_indoor_bike_data_hr_zero_filtered_as_none() {
-        // HEART_RATE flag set, HR byte = 0 → filtered to None.
+    fn parse_indoor_bike_data_hr_zero_raw() {
+        // HEART_RATE flag set, HR byte = 0 → returned as raw Some(0).
+        // Device-specific filtering is handled by the trainer-quirks crate.
         // Flags: HEART_RATE = 0x0200, speed present (MORE_DATA not set).
         // Speed: 2000 => 20.00 km/h, HR: 0 bpm
         let data = [0x00, 0x02, 0xD0, 0x07, 0x00];
         let result = parse_indoor_bike_data(&data).unwrap();
         assert!((result.instantaneous_speed_kmh.unwrap() - 20.0).abs() < 0.01);
-        assert_eq!(result.heart_rate_bpm, None);
+        assert_eq!(result.heart_rate_bpm, Some(0));
     }
 
     #[test]

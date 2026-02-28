@@ -1,4 +1,4 @@
-.PHONY: build test test-ftms test-ble test-safety clippy clean coverage coverage-ble \
+.PHONY: build test test-ftms test-ble test-safety test-quirks clippy clean coverage coverage-ble \
        build-examples run-example-scan run-example-connect run-example-read run-example-write run-example-full
 
 build:
@@ -16,11 +16,14 @@ test-ble:
 test-safety:
 	cargo test -p safety
 
+test-quirks:
+	cargo test -p trainer-quirks
+
 clippy:
 	cargo clippy --workspace -- -D warnings
 
 coverage:
-	cargo tarpaulin -p ftms-parser -p ble-transport -p safety --out Stdout
+	cargo tarpaulin -p ftms-parser -p ble-transport -p safety -p trainer-quirks --out Stdout
 
 coverage-ble:
 	cargo tarpaulin -p ble-transport --exclude-files "ble-transport/src/traits.rs" --exclude-files "ftms-parser/src/lib.rs" --out Stdout

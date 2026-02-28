@@ -39,6 +39,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+ "trainer-quirks",
  "uuid",
 ]
 
@@ -807,6 +808,13 @@ dependencies = [
  "futures-sink",
  "pin-project-lite",
  "tokio",
+]
+
+[[package]]
+name = "trainer-quirks"
+version = "0.1.0"
+dependencies = [
+ "ftms-parser",
 ]
 
 [[package]]

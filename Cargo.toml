@@ -3,6 +3,7 @@ members = [
     "ftms-parser",
     "ble-transport",
     "safety",
+    "trainer-quirks",
 ]
 resolver = "3"
 

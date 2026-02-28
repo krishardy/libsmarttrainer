@@ -30,9 +30,9 @@ The `Disconnect` variant does not correspond to an FTMS control point op code. I
 
 `scan_for_ftms_devices()` returns metadata alongside the peripheral so consumers can present device info to the user before passing the peripheral to `connect_to_trainer()`. This avoids coupling scanner and connection modules.
 
-## Heart rate zero filtering (ftms-parser)
+## Heart rate zero filtering (trainer-quirks)
 
-The JetBlack Volt V2 (and potentially other trainers) reports `heart_rate_bpm=0` in Indoor Bike Data notifications when fully stopped. Since 0 bpm is physiologically impossible (the BLE HR Service spec 0x2A37 uses 0 to mean "not available"), the parser filters HR=0 to `None`. This is done in the parser so all consumers (UI, session recording, etc.) get the fix automatically.
+The JetBlack Volt V2 (and potentially other trainers) reports `heart_rate_bpm=0` in Indoor Bike Data notifications when fully stopped. Since 0 bpm is physiologically impossible (the BLE HR Service spec 0x2A37 uses 0 to mean "not available"), this is filtered to `None`. The filtering lives in the `trainer-quirks` crate and is applied via `apply_default_quirks()` in `handle_notification()` after the parser returns raw data. The `ftms-parser` crate returns spec-faithful data (`Some(0)`), keeping device-specific behavioral interpretation out of the wire-protocol parser.
 
 ## Command debouncing (debounce.rs)
 
