@@ -91,17 +91,8 @@ impl<P: BlePeripheral> FtmsConnection<P> {
         // Get notification stream before writing control point.
         let mut stream = self.peripheral.notifications().await?;
 
-        // Step 6: Write Request Control.
-        let request_control = ftms_parser::serialize_control_point_request_control();
-        self.peripheral
-            .write(&control_point, &request_control, WriteType::WithResponse)
-            .await?;
-
-        // Step 7: Wait for success indication.
-        let resp = wait_cp_response(&mut stream, CONTROL_POINT_UUID).await?;
-        if resp.result_code != ftms_parser::ControlPointResultCode::Success {
-            return Err(BleTransportError::ControlPointRejected(resp));
-        }
+        // Step 6 & 7: Write Request Control and wait for success, with retries on timeout.
+        request_control_with_retry(&self.peripheral, &control_point, &mut stream).await?;
 
         // Cache characteristics.
         self.characteristics = Some(FtmsCharacteristics {
@@ -162,9 +153,49 @@ pub fn find_characteristic(
         .ok_or_else(|| BleTransportError::CharacteristicNotFound(uuid.to_string()))
 }
 
+/// Maximum number of attempts for the Request Control handshake.
+const REQUEST_CONTROL_MAX_ATTEMPTS: u32 = 3;
+
+/// Write Request Control to the Control Point and wait for success indication.
+///
+/// Retries up to [`REQUEST_CONTROL_MAX_ATTEMPTS`] times on timeout errors before
+/// propagating the failure.
+async fn request_control_with_retry<P: BlePeripheral>(
+    peripheral: &P,
+    control_point: &Characteristic,
+    stream: &mut Pin<Box<dyn Stream<Item = ValueNotification> + Send>>,
+) -> Result<()> {
+    let request_control = ftms_parser::serialize_control_point_request_control();
+
+    for attempt in 1..=REQUEST_CONTROL_MAX_ATTEMPTS {
+        peripheral
+            .write(control_point, &request_control, WriteType::WithResponse)
+            .await?;
+
+        match wait_cp_response(stream, CONTROL_POINT_UUID).await {
+            Ok(resp) => {
+                if resp.result_code != ftms_parser::ControlPointResultCode::Success {
+                    return Err(BleTransportError::ControlPointRejected(resp));
+                }
+                return Ok(());
+            }
+            Err(BleTransportError::Timeout) if attempt < REQUEST_CONTROL_MAX_ATTEMPTS => {
+                info!(
+                    "Request Control timed out (attempt {attempt}/{REQUEST_CONTROL_MAX_ATTEMPTS}), retrying..."
+                );
+                continue;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    // Should not be reached, but cover the edge case.
+    Err(BleTransportError::Timeout)
+}
+
 /// Wait for a Control Point indication response on the notification stream.
 ///
-/// Times out after 5 seconds.
+/// Times out after 10 seconds.
 async fn wait_cp_response(
     stream: &mut Pin<Box<dyn Stream<Item = ValueNotification> + Send>>,
     control_point_uuid: uuid::Uuid,
@@ -681,12 +712,156 @@ mod tests {
     #[tokio::test]
     async fn wait_cp_response_timeout() {
         tokio::time::pause();
-        // A pending stream never produces items, triggering the 5s timeout.
+        // A pending stream never produces items, triggering the 10s timeout.
         let mut stream: Pin<Box<dyn Stream<Item = ValueNotification> + Send>> =
             Box::pin(futures::stream::pending());
 
         let result = wait_cp_response(&mut stream, CONTROL_POINT_UUID).await;
         assert!(matches!(result, Err(BleTransportError::Timeout)));
+    }
+
+    // --- Request Control retry tests ---
+
+    /// Mock peripheral that tracks write count and feeds notifications via a channel.
+    struct ChannelPeripheral {
+        characteristics: BTreeSet<Characteristic>,
+        feature_data: Vec<u8>,
+        write_count: Arc<Mutex<u32>>,
+        notif_rx: Arc<Mutex<Option<tokio::sync::mpsc::Receiver<ValueNotification>>>>,
+    }
+
+    #[async_trait]
+    impl BlePeripheral for ChannelPeripheral {
+        async fn connect(&self) -> std::result::Result<(), btleplug::Error> {
+            Ok(())
+        }
+        async fn disconnect(&self) -> std::result::Result<(), btleplug::Error> {
+            Ok(())
+        }
+        async fn is_connected(&self) -> std::result::Result<bool, btleplug::Error> {
+            Ok(true)
+        }
+        async fn discover_services(&self) -> std::result::Result<(), btleplug::Error> {
+            Ok(())
+        }
+        fn characteristics(&self) -> BTreeSet<Characteristic> {
+            self.characteristics.clone()
+        }
+        fn services(&self) -> BTreeSet<Service> {
+            BTreeSet::new()
+        }
+        async fn properties(
+            &self,
+        ) -> std::result::Result<Option<PeripheralProperties>, btleplug::Error> {
+            Ok(None)
+        }
+        async fn read(
+            &self,
+            _characteristic: &Characteristic,
+        ) -> std::result::Result<Vec<u8>, btleplug::Error> {
+            Ok(self.feature_data.clone())
+        }
+        async fn write(
+            &self,
+            _characteristic: &Characteristic,
+            _data: &[u8],
+            _write_type: WriteType,
+        ) -> std::result::Result<(), btleplug::Error> {
+            let mut count = self.write_count.lock().unwrap();
+            *count += 1;
+            Ok(())
+        }
+        async fn subscribe(
+            &self,
+            _characteristic: &Characteristic,
+        ) -> std::result::Result<(), btleplug::Error> {
+            Ok(())
+        }
+        async fn notifications(
+            &self,
+        ) -> std::result::Result<
+            Pin<Box<dyn futures::Stream<Item = ValueNotification> + Send>>,
+            btleplug::Error,
+        > {
+            let rx = self.notif_rx.lock().unwrap().take().unwrap();
+            let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+            Ok(Box::pin(stream))
+        }
+    }
+
+    #[tokio::test]
+    async fn request_control_retries_on_timeout_then_succeeds() {
+        tokio::time::pause();
+
+        let (notif_tx, notif_rx) = tokio::sync::mpsc::channel(32);
+        let write_count = Arc::new(Mutex::new(0u32));
+
+        let peripheral = ChannelPeripheral {
+            characteristics: make_ftms_characteristics(),
+            feature_data: feature_data(),
+            write_count: write_count.clone(),
+            notif_rx: Arc::new(Mutex::new(Some(notif_rx))),
+        };
+        let mut conn = FtmsConnection::new(peripheral);
+        let (tx, rx) = crate::trainer_data_channel();
+
+        // Spawn the connect_and_setup in a task.
+        let handle = tokio::spawn(async move { conn.connect_and_setup(&tx).await });
+
+        // First attempt: let it time out (advance 10s).
+        tokio::time::sleep(Duration::from_secs(11)).await;
+
+        // Second attempt: send a success response.
+        notif_tx
+            .send(ValueNotification {
+                uuid: CONTROL_POINT_UUID,
+                value: cp_success_response(),
+            })
+            .await
+            .unwrap();
+
+        let result = handle.await.unwrap();
+        assert!(result.is_ok(), "Expected success after retry");
+        assert_eq!(rx.borrow().connection_state, ConnectionState::Connected);
+
+        // Should have written Request Control twice (first timeout, then success).
+        let writes = *write_count.lock().unwrap();
+        assert_eq!(writes, 2, "Expected 2 Request Control writes");
+    }
+
+    #[tokio::test]
+    async fn request_control_three_consecutive_timeouts() {
+        tokio::time::pause();
+
+        let (_notif_tx, notif_rx) = tokio::sync::mpsc::channel::<ValueNotification>(32);
+        let write_count = Arc::new(Mutex::new(0u32));
+
+        let peripheral = ChannelPeripheral {
+            characteristics: make_ftms_characteristics(),
+            feature_data: feature_data(),
+            write_count: write_count.clone(),
+            notif_rx: Arc::new(Mutex::new(Some(notif_rx))),
+        };
+        let mut conn = FtmsConnection::new(peripheral);
+        let (tx, _rx) = crate::trainer_data_channel();
+
+        let handle = tokio::spawn(async move { conn.connect_and_setup(&tx).await });
+
+        // Let all 3 attempts time out (3 × 10s + buffer).
+        tokio::time::sleep(Duration::from_secs(35)).await;
+
+        // Drop sender to unblock any remaining reads.
+        drop(_notif_tx);
+
+        let result = handle.await.unwrap();
+        assert!(
+            matches!(&result, Err(BleTransportError::Timeout)),
+            "Expected Timeout after 3 failures"
+        );
+
+        // Should have written Request Control 3 times.
+        let writes = *write_count.lock().unwrap();
+        assert_eq!(writes, 3, "Expected 3 Request Control writes");
     }
 
     #[tokio::test]
