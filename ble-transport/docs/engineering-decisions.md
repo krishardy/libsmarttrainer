@@ -29,3 +29,17 @@ The `Disconnect` variant does not correspond to an FTMS control point op code. I
 ## Scanner returns (DiscoveredDevice, Peripheral) tuples
 
 `scan_for_ftms_devices()` returns metadata alongside the peripheral so consumers can present device info to the user before passing the peripheral to `connect_to_trainer()`. This avoids coupling scanner and connection modules.
+
+## Heart rate zero filtering (ftms-parser)
+
+The JetBlack Volt V2 (and potentially other trainers) reports `heart_rate_bpm=0` in Indoor Bike Data notifications when fully stopped. Since 0 bpm is physiologically impossible (the BLE HR Service spec 0x2A37 uses 0 to mean "not available"), the parser filters HR=0 to `None`. This is done in the parser so all consumers (UI, session recording, etc.) get the fix automatically.
+
+## Command debouncing (debounce.rs)
+
+`CommandDebouncer` enforces a minimum 1-second interval between control commands written to the trainer. Some trainers reject rapid command sequences. The debouncer uses a "keep latest" strategy: when a command arrives too soon, it overwrites any existing pending command. The pending command fires when the interval elapses via a `tokio::select!` branch.
+
+Safety-critical writes (ERG death spiral overrides, ramp ticks) bypass the debouncer entirely but call `record_write()` to reset the timer. `Disconnect` and `Reset` also bypass debouncing. The `CommandDebouncer` uses deterministic time injection (`Instant` parameters) for testability, following the same pattern as `ErgSafetyMonitor` in the safety crate.
+
+## Feature capability validation (transport.rs, connection.rs)
+
+The Feature characteristic (0x2ACC) is read at connect time and the parsed `FitnessMachineFeature` is stored in `FtmsCharacteristics`. Before sending control commands, `validate_command_feature()` checks the trainer's `TargetSettingFeatures` flags. The validation is **fail-open**: if feature parsing failed (e.g., read error, malformed data), commands are sent unconditionally. This prevents a parsing edge case from blocking a functional trainer. Only when a feature is explicitly absent does the command get skipped with a warning log.

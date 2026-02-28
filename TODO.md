@@ -6,10 +6,11 @@
 
 - [ ] Multiple trainer support (handle >1 FTMS device in range) [Low, 2h]
 - [ ] Trainer-specific quirk testing and workarounds [4.7, Med, 4h]
+- [ ] Move any JetBlack Volt v2 code to a workspace member crate
 
 ### Documention
 
-- [ ] Create library usage examples
+- [ ] Create library usage examples [2]
       - Scanning
       - Connecting
       - Reading data

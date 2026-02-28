@@ -19,6 +19,7 @@ pub struct FtmsCharacteristics {
     pub control_point: Characteristic,
     pub feature: Characteristic,
     pub status: Option<Characteristic>,
+    pub parsed_features: Option<ftms_parser::FitnessMachineFeature>,
 }
 
 /// An FTMS connection to a BLE peripheral.
@@ -98,10 +99,17 @@ impl<P: BlePeripheral> FtmsConnection<P> {
 
         // Step 4: Read Feature characteristic.
         let feature_data = self.peripheral.read(&feature).await?;
-        if let Ok(features) = ftms_parser::parse_feature(&feature_data) {
-            info!("Machine features: {:?}", features.fitness_machine);
-            info!("Target settings:  {:?}", features.target_setting);
-        }
+        let parsed_features = match ftms_parser::parse_feature(&feature_data) {
+            Ok(features) => {
+                info!("Machine features: {:?}", features.fitness_machine);
+                info!("Target settings:  {:?}", features.target_setting);
+                Some(features)
+            }
+            Err(e) => {
+                warn!("Failed to parse feature characteristic: {e}");
+                None
+            }
+        };
 
         // Step 5: Subscribe to notifications.
         self.peripheral.subscribe(&indoor_bike_data).await?;
@@ -122,6 +130,7 @@ impl<P: BlePeripheral> FtmsConnection<P> {
             control_point,
             feature,
             status,
+            parsed_features,
         });
 
         // Signal connected state.
@@ -154,6 +163,13 @@ impl<P: BlePeripheral> FtmsConnection<P> {
         }
 
         Ok(())
+    }
+
+    /// Get the parsed feature flags, if available.
+    pub fn parsed_features(&self) -> Option<&ftms_parser::FitnessMachineFeature> {
+        self.characteristics
+            .as_ref()
+            .and_then(|c| c.parsed_features.as_ref())
     }
 
     /// Disconnect from the peripheral.
@@ -988,6 +1004,30 @@ mod tests {
         let result = conn.connect_and_setup(&tx).await;
         assert!(result.is_ok(), "Expected success after retry");
         assert_eq!(rx.borrow().connection_state, ConnectionState::Connected);
+    }
+
+    #[tokio::test]
+    async fn parsed_features_populated_after_connect() {
+        let mut config = MockPeripheralConfig::default();
+        // Set feature data with POWER_TARGET (bit 3) = 0x08.
+        config.feature_data = vec![0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00];
+        let peripheral = TestPeripheral::new(config);
+        let mut conn = FtmsConnection::new(peripheral);
+        let (tx, _rx) = crate::trainer_data_channel();
+
+        let _stream = conn.connect_and_setup(&tx).await.unwrap();
+        let features = conn.parsed_features().unwrap();
+        assert!(features
+            .target_setting
+            .contains(ftms_parser::TargetSettingFeatures::POWER_TARGET));
+    }
+
+    #[tokio::test]
+    async fn parsed_features_none_before_connect() {
+        let config = MockPeripheralConfig::default();
+        let peripheral = TestPeripheral::new(config);
+        let conn = FtmsConnection::new(peripheral);
+        assert!(conn.parsed_features().is_none());
     }
 
     #[tokio::test]

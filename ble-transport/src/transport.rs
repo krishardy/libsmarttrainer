@@ -9,9 +9,55 @@ use tokio::sync::{mpsc, watch};
 use crate::commands::TrainerCommand;
 use crate::connection::FtmsConnection;
 use crate::constants::INDOOR_BIKE_DATA_UUID;
+use crate::debounce::CommandDebouncer;
 use crate::error::Result;
 use crate::traits::BlePeripheral;
 use crate::{ConnectionState, TrainerData};
+
+/// Check whether the trainer supports a given command based on parsed features.
+///
+/// Fail-open: if features were not parsed (e.g., feature read failed), the
+/// command is allowed unconditionally. Only returns `Err` when the feature is
+/// explicitly absent.
+pub(crate) fn validate_command_feature(
+    cmd: &TrainerCommand,
+    features: &Option<ftms_parser::FitnessMachineFeature>,
+) -> std::result::Result<(), crate::error::BleTransportError> {
+    let Some(f) = features else {
+        return Ok(());
+    };
+    match cmd {
+        TrainerCommand::SetTargetPower(_) => {
+            if !f.target_setting.contains(ftms_parser::TargetSettingFeatures::POWER_TARGET) {
+                return Err(crate::error::BleTransportError::FeatureNotSupported(
+                    "power target".into(),
+                ));
+            }
+        }
+        TrainerCommand::SetTargetResistance(_) => {
+            if !f
+                .target_setting
+                .contains(ftms_parser::TargetSettingFeatures::RESISTANCE_TARGET)
+            {
+                return Err(crate::error::BleTransportError::FeatureNotSupported(
+                    "resistance target".into(),
+                ));
+            }
+        }
+        TrainerCommand::SetIndoorBikeSimulation { .. } => {
+            if !f
+                .target_setting
+                .contains(ftms_parser::TargetSettingFeatures::INDOOR_BIKE_SIMULATION)
+            {
+                return Err(crate::error::BleTransportError::FeatureNotSupported(
+                    "indoor bike simulation".into(),
+                ));
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
 
 /// Whether the background loop should continue or break.
 #[derive(Debug, PartialEq, Eq)]
@@ -129,6 +175,7 @@ pub async fn connect_to_trainer<P: BlePeripheral>(
 ) -> Result<(TrainerHandle, tokio::task::JoinHandle<()>)> {
     let mut connection = FtmsConnection::new(peripheral);
     let mut notification_stream = connection.connect_and_setup(&data_tx).await?;
+    let parsed_features = connection.parsed_features().cloned();
 
     let (command_tx, mut command_rx) = mpsc::channel::<TrainerCommand>(32);
 
@@ -139,6 +186,7 @@ pub async fn connect_to_trainer<P: BlePeripheral>(
 
     let join_handle = tokio::spawn(async move {
         let mut erg_monitor = ErgSafetyMonitor::new();
+        let mut debouncer = CommandDebouncer::new();
         let mut ramp_interval = tokio::time::interval(std::time::Duration::from_millis(500));
         ramp_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -163,6 +211,9 @@ pub async fn connect_to_trainer<P: BlePeripheral>(
                             {
                                 error!("ERG safety write error: {e}");
                             }
+                            // Safety writes bypass the debouncer, but record
+                            // the write so user commands respect the interval.
+                            debouncer.record_write(Instant::now());
                         }
                     }
                 }
@@ -176,10 +227,9 @@ pub async fn connect_to_trainer<P: BlePeripheral>(
                             send_disconnected(&data_tx);
                             break;
                         }
-                        Some(TrainerCommand::SetTargetPower(watts)) => {
-                            let now = Instant::now();
-                            let actual = erg_monitor.on_set_target_power(watts, now);
-                            let cmd = TrainerCommand::SetTargetPower(actual);
+                        Some(TrainerCommand::Reset) => {
+                            // Reset bypasses the debouncer.
+                            let cmd = TrainerCommand::Reset;
                             if let Some(bytes) = cmd.serialize()
                                 && let Err(e) = connection.write_control_command(
                                     &bytes,
@@ -189,25 +239,68 @@ pub async fn connect_to_trainer<P: BlePeripheral>(
                                 error!("Control command error: {e}");
                             }
                         }
-                        Some(cmd) => {
-                            // Non-ERG command — deactivate ERG safety.
-                            if matches!(cmd, TrainerCommand::SetTargetResistance(_)
-                                | TrainerCommand::SetIndoorBikeSimulation { .. })
-                            {
-                                erg_monitor.on_non_erg_command();
+                        Some(TrainerCommand::SetTargetPower(watts)) => {
+                            let cmd = TrainerCommand::SetTargetPower(watts);
+                            if let Err(e) = validate_command_feature(&cmd, &parsed_features) {
+                                warn!("{e}");
+                            } else {
+                                let now = Instant::now();
+                                let actual = erg_monitor.on_set_target_power(watts, now);
+                                let send = TrainerCommand::SetTargetPower(actual);
+                                if let Some(send_cmd) = debouncer.submit(send, now)
+                                    && let Some(bytes) = send_cmd.serialize()
+                                    && let Err(e) = connection.write_control_command(
+                                        &bytes,
+                                        &mut notification_stream,
+                                    ).await
+                                {
+                                    error!("Control command error: {e}");
+                                }
                             }
-                            if let Some(bytes) = cmd.serialize()
-                                && let Err(e) = connection.write_control_command(
-                                    &bytes,
-                                    &mut notification_stream,
-                                ).await
-                            {
-                                error!("Control command error: {e}");
+                        }
+                        Some(cmd) => {
+                            if let Err(e) = validate_command_feature(&cmd, &parsed_features) {
+                                warn!("{e}");
+                            } else {
+                                // Non-ERG control command — deactivate ERG safety,
+                                // run through debouncer.
+                                if matches!(cmd, TrainerCommand::SetTargetResistance(_)
+                                    | TrainerCommand::SetIndoorBikeSimulation { .. })
+                                {
+                                    erg_monitor.on_non_erg_command();
+                                }
+                                let now = Instant::now();
+                                if let Some(send_cmd) = debouncer.submit(cmd, now)
+                                    && let Some(bytes) = send_cmd.serialize()
+                                    && let Err(e) = connection.write_control_command(
+                                        &bytes,
+                                        &mut notification_stream,
+                                    ).await
+                                {
+                                    error!("Control command error: {e}");
+                                }
                             }
                         }
                         None => {
                             break;
                         }
+                    }
+                }
+                // Debounce timer: fire pending command after interval elapses.
+                _ = async {
+                    match debouncer.time_until_next(Instant::now()) {
+                        Some(d) => tokio::time::sleep(d).await,
+                        None => std::future::pending::<()>().await,
+                    }
+                } => {
+                    if let Some(cmd) = debouncer.poll_pending(Instant::now())
+                        && let Some(bytes) = cmd.serialize()
+                        && let Err(e) = connection.write_control_command(
+                            &bytes,
+                            &mut notification_stream,
+                        ).await
+                    {
+                        error!("Debounced command write error: {e}");
                     }
                 }
                 _ = ramp_interval.tick(), if erg_monitor.needs_tick() => {
@@ -223,6 +316,8 @@ pub async fn connect_to_trainer<P: BlePeripheral>(
                         {
                             error!("ERG ramp write error: {e}");
                         }
+                        // Ramp ticks are safety-critical; record the write.
+                        debouncer.record_write(Instant::now());
                     }
                 }
             }
@@ -266,8 +361,10 @@ mod tests {
         chars
     }
 
+    /// Feature data with POWER_TARGET | RESISTANCE_TARGET | INDOOR_BIKE_SIMULATION.
+    /// Target setting bits: (1<<3) | (1<<2) | (1<<13) = 0x200C.
     fn feature_data() -> Vec<u8> {
-        vec![0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+        vec![0x00, 0x00, 0x00, 0x00, 0x0C, 0x20, 0x00, 0x00]
     }
 
     fn cp_success_response() -> Vec<u8> {
@@ -764,4 +861,70 @@ mod tests {
     }
 
     use std::time::Duration;
+
+    // --- Feature validation tests ---
+
+    #[test]
+    fn validate_allows_when_features_none() {
+        // Fail-open: no parsed features → all commands allowed.
+        let cmd = TrainerCommand::SetTargetPower(200);
+        assert!(validate_command_feature(&cmd, &None).is_ok());
+    }
+
+    #[test]
+    fn validate_allows_supported_power_target() {
+        let features = Some(ftms_parser::FitnessMachineFeature {
+            fitness_machine: ftms_parser::FitnessMachineFeatures::empty(),
+            target_setting: ftms_parser::TargetSettingFeatures::POWER_TARGET,
+        });
+        let cmd = TrainerCommand::SetTargetPower(200);
+        assert!(validate_command_feature(&cmd, &features).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_unsupported_power_target() {
+        let features = Some(ftms_parser::FitnessMachineFeature {
+            fitness_machine: ftms_parser::FitnessMachineFeatures::empty(),
+            target_setting: ftms_parser::TargetSettingFeatures::empty(),
+        });
+        let cmd = TrainerCommand::SetTargetPower(200);
+        let err = validate_command_feature(&cmd, &features).unwrap_err();
+        assert!(matches!(err, crate::error::BleTransportError::FeatureNotSupported(_)));
+    }
+
+    #[test]
+    fn validate_rejects_unsupported_resistance() {
+        let features = Some(ftms_parser::FitnessMachineFeature {
+            fitness_machine: ftms_parser::FitnessMachineFeatures::empty(),
+            target_setting: ftms_parser::TargetSettingFeatures::POWER_TARGET,
+        });
+        let cmd = TrainerCommand::SetTargetResistance(50);
+        let err = validate_command_feature(&cmd, &features).unwrap_err();
+        assert!(matches!(err, crate::error::BleTransportError::FeatureNotSupported(_)));
+    }
+
+    #[test]
+    fn validate_rejects_unsupported_simulation() {
+        let features = Some(ftms_parser::FitnessMachineFeature {
+            fitness_machine: ftms_parser::FitnessMachineFeatures::empty(),
+            target_setting: ftms_parser::TargetSettingFeatures::POWER_TARGET,
+        });
+        let cmd = TrainerCommand::SetIndoorBikeSimulation {
+            grade_001_pct: 500,
+            crr: 40,
+            cw: 51,
+        };
+        let err = validate_command_feature(&cmd, &features).unwrap_err();
+        assert!(matches!(err, crate::error::BleTransportError::FeatureNotSupported(_)));
+    }
+
+    #[test]
+    fn validate_allows_disconnect_and_reset() {
+        let features = Some(ftms_parser::FitnessMachineFeature {
+            fitness_machine: ftms_parser::FitnessMachineFeatures::empty(),
+            target_setting: ftms_parser::TargetSettingFeatures::empty(),
+        });
+        assert!(validate_command_feature(&TrainerCommand::Disconnect, &features).is_ok());
+        assert!(validate_command_feature(&TrainerCommand::Reset, &features).is_ok());
+    }
 }

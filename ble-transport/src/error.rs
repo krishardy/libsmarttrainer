@@ -32,6 +32,9 @@ pub enum BleTransportError {
 
     #[error("not connected to device")]
     NotConnected,
+
+    #[error("trainer does not support {0}")]
+    FeatureNotSupported(String),
 }
 
 impl From<btleplug::Error> for BleTransportError {
@@ -76,6 +79,9 @@ impl BleTransportError {
             }
             BleTransportError::ControlPointRejected(_) => {
                 "Trainer rejected command. The feature may not be supported.".into()
+            }
+            BleTransportError::FeatureNotSupported(feature) => {
+                format!("Your trainer does not support {feature}. Try a different control mode.")
             }
             BleTransportError::Parse(e) => {
                 format!("Data parsing error: {e}.")
@@ -268,5 +274,19 @@ mod tests {
         let err = BleTransportError::Btleplug(btleplug::Error::DeviceNotFound);
         let msg = err.user_message();
         assert!(msg.contains("Bluetooth error"));
+    }
+
+    #[test]
+    fn display_feature_not_supported() {
+        let err = BleTransportError::FeatureNotSupported("power target".into());
+        assert_eq!(err.to_string(), "trainer does not support power target");
+    }
+
+    #[test]
+    fn user_message_feature_not_supported() {
+        let err = BleTransportError::FeatureNotSupported("power target".into());
+        let msg = err.user_message();
+        assert!(msg.contains("does not support power target"));
+        assert!(msg.contains("different control mode"));
     }
 }
