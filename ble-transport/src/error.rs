@@ -87,7 +87,12 @@ impl BleTransportError {
                 format!("Data parsing error: {e}.")
             }
             BleTransportError::Btleplug(e) => {
-                format!("Bluetooth error: {e}")
+                let msg = e.to_string();
+                if msg.contains("Service discovery timed out") {
+                    "Service discovery timed out. Try connecting again — this is a transient Bluetooth issue.".into()
+                } else {
+                    format!("Bluetooth error: {msg}")
+                }
             }
         }
     }
@@ -274,6 +279,16 @@ mod tests {
         let err = BleTransportError::Btleplug(btleplug::Error::DeviceNotFound);
         let msg = err.user_message();
         assert!(msg.contains("Bluetooth error"));
+    }
+
+    #[test]
+    fn user_message_service_discovery_timed_out() {
+        let err = BleTransportError::Btleplug(btleplug::Error::Other(
+            "Service discovery timed out".into(),
+        ));
+        let msg = err.user_message();
+        assert!(msg.contains("Service discovery timed out"));
+        assert!(msg.contains("transient Bluetooth issue"));
     }
 
     #[test]

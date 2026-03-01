@@ -78,6 +78,7 @@ impl<P: BlePeripheral> FtmsConnection<P> {
                     );
                     last_err = Some(e);
                     let _ = self.peripheral.disconnect().await;
+                    tokio::time::sleep(Duration::from_secs(DISCOVER_RETRY_DELAY_SECS)).await;
                 }
                 Err(e) => {
                     last_err = Some(e);
@@ -203,6 +204,9 @@ pub fn find_characteristic(
 
 /// Maximum number of attempts for service discovery.
 const DISCOVER_SERVICES_MAX_ATTEMPTS: u32 = 3;
+
+/// Delay in seconds between service discovery retry attempts.
+const DISCOVER_RETRY_DELAY_SECS: u64 = 2;
 
 /// Maximum number of attempts for the Request Control handshake.
 const REQUEST_CONTROL_MAX_ATTEMPTS: u32 = 3;
@@ -1015,6 +1019,7 @@ mod tests {
 
     #[tokio::test]
     async fn connect_retries_on_service_discovery_timeout() {
+        tokio::time::pause();
         let config = MockPeripheralConfig::default();
         let peripheral = ConnectFailPeripheral::new(config, 1); // Fail first connect, succeed second.
         let mut conn = FtmsConnection::new(peripheral);
@@ -1051,6 +1056,7 @@ mod tests {
 
     #[tokio::test]
     async fn connect_all_attempts_fail() {
+        tokio::time::pause();
         let config = MockPeripheralConfig::default();
         let peripheral = ConnectFailPeripheral::new(config, DISCOVER_SERVICES_MAX_ATTEMPTS);
         let mut conn = FtmsConnection::new(peripheral);
