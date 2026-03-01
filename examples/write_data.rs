@@ -5,11 +5,11 @@
 //! - Resistance (target resistance level)
 //! - Indoor Bike Simulation (grade, rolling resistance, wind resistance)
 //!
-//! Run with: `cargo run -p ble-transport --example write_data`
+//! Run with: `cargo run --example write_data`
 
 use std::time::Duration;
 
-use ble_transport::{
+use libsmarttrainer::ble::{
     connect_to_trainer, get_adapter, scan_for_ftms_devices, trainer_data_channel,
 };
 

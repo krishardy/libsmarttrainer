@@ -6,12 +6,12 @@ use futures::stream::{Stream, StreamExt};
 use log::{info, warn};
 use tokio::sync::watch;
 
-use crate::constants::{
+use crate::ble::constants::{
     CONTROL_POINT_UUID, FEATURE_UUID, FITNESS_MACHINE_STATUS_UUID, INDOOR_BIKE_DATA_UUID,
 };
-use crate::error::{BleTransportError, Result};
-use crate::traits::BlePeripheral;
-use crate::{ConnectionState, TrainerData};
+use crate::ble::error::{BleTransportError, Result};
+use crate::ble::traits::BlePeripheral;
+use crate::ble::{ConnectionState, TrainerData};
 
 /// Cached characteristic handles discovered during FTMS setup.
 pub struct FtmsCharacteristics {
@@ -19,7 +19,7 @@ pub struct FtmsCharacteristics {
     pub control_point: Characteristic,
     pub feature: Characteristic,
     pub status: Option<Characteristic>,
-    pub parsed_features: Option<ftms_parser::FitnessMachineFeature>,
+    pub parsed_features: Option<crate::parser::FitnessMachineFeature>,
 }
 
 /// An FTMS connection to a BLE peripheral.
@@ -100,7 +100,7 @@ impl<P: BlePeripheral> FtmsConnection<P> {
 
         // Step 4: Read Feature characteristic.
         let feature_data = self.peripheral.read(&feature).await?;
-        let parsed_features = match ftms_parser::parse_feature(&feature_data) {
+        let parsed_features = match crate::parser::parse_feature(&feature_data) {
             Ok(features) => {
                 info!("Machine features: {:?}", features.fitness_machine);
                 info!("Target settings:  {:?}", features.target_setting);
@@ -169,7 +169,7 @@ impl<P: BlePeripheral> FtmsConnection<P> {
             .await?;
 
         let resp = wait_cp_response(stream, CONTROL_POINT_UUID).await?;
-        if resp.result_code != ftms_parser::ControlPointResultCode::Success {
+        if resp.result_code != crate::parser::ControlPointResultCode::Success {
             return Err(BleTransportError::ControlPointRejected(resp));
         }
 
@@ -177,7 +177,7 @@ impl<P: BlePeripheral> FtmsConnection<P> {
     }
 
     /// Get the parsed feature flags, if available.
-    pub fn parsed_features(&self) -> Option<&ftms_parser::FitnessMachineFeature> {
+    pub fn parsed_features(&self) -> Option<&crate::parser::FitnessMachineFeature> {
         self.characteristics
             .as_ref()
             .and_then(|c| c.parsed_features.as_ref())
@@ -220,7 +220,7 @@ async fn request_control_with_retry<P: BlePeripheral>(
     control_point: &Characteristic,
     stream: &mut Pin<Box<dyn Stream<Item = ValueNotification> + Send>>,
 ) -> Result<()> {
-    let request_control = ftms_parser::serialize_control_point_request_control();
+    let request_control = crate::parser::serialize_control_point_request_control();
 
     for attempt in 1..=REQUEST_CONTROL_MAX_ATTEMPTS {
         peripheral
@@ -229,7 +229,7 @@ async fn request_control_with_retry<P: BlePeripheral>(
 
         match wait_cp_response(stream, CONTROL_POINT_UUID).await {
             Ok(resp) => {
-                if resp.result_code != ftms_parser::ControlPointResultCode::Success {
+                if resp.result_code != crate::parser::ControlPointResultCode::Success {
                     return Err(BleTransportError::ControlPointRejected(resp));
                 }
                 return Ok(());
@@ -254,12 +254,12 @@ async fn request_control_with_retry<P: BlePeripheral>(
 async fn wait_cp_response(
     stream: &mut Pin<Box<dyn Stream<Item = ValueNotification> + Send>>,
     control_point_uuid: uuid::Uuid,
-) -> Result<ftms_parser::ControlPointResponse> {
+) -> Result<crate::parser::ControlPointResponse> {
     let timeout_duration = Duration::from_secs(10);
     let result = tokio::time::timeout(timeout_duration, async {
         while let Some(notification) = stream.next().await {
             if notification.uuid == control_point_uuid {
-                return ftms_parser::parse_control_point_response(&notification.value)
+                return crate::parser::parse_control_point_response(&notification.value)
                     .map_err(BleTransportError::from);
             }
         }
@@ -276,8 +276,8 @@ async fn wait_cp_response(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constants::*;
-    use crate::traits::BlePeripheral;
+    use crate::ble::constants::*;
+    use crate::ble::traits::BlePeripheral;
     use async_trait::async_trait;
     use btleplug::api::{
         CharPropFlags, Characteristic, PeripheralProperties, Service, ValueNotification, WriteType,
@@ -438,7 +438,7 @@ mod tests {
         let subscribe_log = config.subscribe_log.clone();
         let peripheral = TestPeripheral::new(config);
         let mut conn = FtmsConnection::new(peripheral);
-        let (tx, rx) = crate::trainer_data_channel();
+        let (tx, rx) = crate::ble::trainer_data_channel();
 
         let _stream = conn.connect_and_setup(&tx).await.unwrap();
 
@@ -463,7 +463,7 @@ mod tests {
         let config = MockPeripheralConfig::default();
         let peripheral = TestPeripheral::new(config);
         let mut conn = FtmsConnection::new(peripheral);
-        let (tx, _rx) = crate::trainer_data_channel();
+        let (tx, _rx) = crate::ble::trainer_data_channel();
 
         // Before connect: Disconnected.
         assert_eq!(
@@ -488,7 +488,7 @@ mod tests {
         };
         let peripheral = TestPeripheral::new(config);
         let mut conn = FtmsConnection::new(peripheral);
-        let (tx, _rx) = crate::trainer_data_channel();
+        let (tx, _rx) = crate::ble::trainer_data_channel();
 
         let result = conn.connect_and_setup(&tx).await;
         assert!(matches!(
@@ -511,7 +511,7 @@ mod tests {
         };
         let peripheral = TestPeripheral::new(config);
         let mut conn = FtmsConnection::new(peripheral);
-        let (tx, _rx) = crate::trainer_data_channel();
+        let (tx, _rx) = crate::ble::trainer_data_channel();
 
         let result = conn.connect_and_setup(&tx).await;
         assert!(matches!(
@@ -534,7 +534,7 @@ mod tests {
         };
         let peripheral = TestPeripheral::new(config);
         let mut conn = FtmsConnection::new(peripheral);
-        let (tx, _rx) = crate::trainer_data_channel();
+        let (tx, _rx) = crate::ble::trainer_data_channel();
 
         let result = conn.connect_and_setup(&tx).await;
         assert!(matches!(
@@ -552,7 +552,7 @@ mod tests {
         }];
         let peripheral = TestPeripheral::new(config);
         let mut conn = FtmsConnection::new(peripheral);
-        let (tx, _rx) = crate::trainer_data_channel();
+        let (tx, _rx) = crate::ble::trainer_data_channel();
 
         let result = conn.connect_and_setup(&tx).await;
         assert!(matches!(
@@ -567,7 +567,7 @@ mod tests {
         config.connect_fails = true;
         let peripheral = TestPeripheral::new(config);
         let mut conn = FtmsConnection::new(peripheral);
-        let (tx, _rx) = crate::trainer_data_channel();
+        let (tx, _rx) = crate::ble::trainer_data_channel();
 
         let result = conn.connect_and_setup(&tx).await;
         assert!(matches!(result, Err(BleTransportError::Btleplug(_))));
@@ -590,7 +590,7 @@ mod tests {
         let subscribe_log = config.subscribe_log.clone();
         let peripheral = TestPeripheral::new(config);
         let mut conn = FtmsConnection::new(peripheral);
-        let (tx, _rx) = crate::trainer_data_channel();
+        let (tx, _rx) = crate::ble::trainer_data_channel();
 
         let _stream = conn.connect_and_setup(&tx).await.unwrap();
 
@@ -605,7 +605,7 @@ mod tests {
         let write_log = config.write_log.clone();
         let peripheral = TestPeripheral::new(config);
         let mut conn = FtmsConnection::new(peripheral);
-        let (tx, _rx) = crate::trainer_data_channel();
+        let (tx, _rx) = crate::ble::trainer_data_channel();
 
         let _stream = conn.connect_and_setup(&tx).await.unwrap();
 
@@ -616,7 +616,7 @@ mod tests {
                 value: cp_success_response(),
             }]));
 
-        let set_power = ftms_parser::serialize_control_point_set_target_power(200);
+        let set_power = crate::parser::serialize_control_point_set_target_power(200);
         conn.write_control_command(&set_power, &mut new_stream)
             .await
             .unwrap();
@@ -649,7 +649,7 @@ mod tests {
         let config = MockPeripheralConfig::default();
         let peripheral = TestPeripheral::new(config);
         let mut conn = FtmsConnection::new(peripheral);
-        let (tx, _rx) = crate::trainer_data_channel();
+        let (tx, _rx) = crate::ble::trainer_data_channel();
 
         let _stream = conn.connect_and_setup(&tx).await.unwrap();
 
@@ -673,7 +673,7 @@ mod tests {
         let config = MockPeripheralConfig::default();
         let peripheral = TestPeripheral::new(config);
         let mut conn = FtmsConnection::new(peripheral);
-        let (tx, _rx) = crate::trainer_data_channel();
+        let (tx, _rx) = crate::ble::trainer_data_channel();
 
         let _stream = conn.connect_and_setup(&tx).await.unwrap();
 
@@ -738,7 +738,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             resp.result_code,
-            ftms_parser::ControlPointResultCode::Success
+            crate::parser::ControlPointResultCode::Success
         );
     }
 
@@ -858,7 +858,7 @@ mod tests {
             notif_rx: Arc::new(Mutex::new(Some(notif_rx))),
         };
         let mut conn = FtmsConnection::new(peripheral);
-        let (tx, rx) = crate::trainer_data_channel();
+        let (tx, rx) = crate::ble::trainer_data_channel();
 
         // Spawn the connect_and_setup in a task.
         let handle = tokio::spawn(async move { conn.connect_and_setup(&tx).await });
@@ -898,7 +898,7 @@ mod tests {
             notif_rx: Arc::new(Mutex::new(Some(notif_rx))),
         };
         let mut conn = FtmsConnection::new(peripheral);
-        let (tx, _rx) = crate::trainer_data_channel();
+        let (tx, _rx) = crate::ble::trainer_data_channel();
 
         let handle = tokio::spawn(async move { conn.connect_and_setup(&tx).await });
 
@@ -930,9 +930,7 @@ mod tests {
     // --- Service discovery retry tests ---
 
     /// Mock peripheral that wraps `TestPeripheral` and fails `connect()`
-    /// a configurable number of times before succeeding. This simulates
-    /// the real-world case where btleplug's `connect()` fails with
-    /// "Service discovery timed out" from bluez-async.
+    /// a configurable number of times before succeeding.
     struct ConnectFailPeripheral {
         inner: TestPeripheral,
         connect_fail_count: u32,
@@ -958,8 +956,6 @@ mod tests {
                 *attempt <= self.connect_fail_count
             };
             if should_fail {
-                // Simulate bluez-async ServiceDiscoveryTimedOut wrapped as
-                // btleplug::Error::Other, which is what happens in production.
                 Err(btleplug::Error::Other(
                     "Service discovery timed out".into(),
                 ))
@@ -1023,7 +1019,7 @@ mod tests {
         let config = MockPeripheralConfig::default();
         let peripheral = ConnectFailPeripheral::new(config, 1); // Fail first connect, succeed second.
         let mut conn = FtmsConnection::new(peripheral);
-        let (tx, rx) = crate::trainer_data_channel();
+        let (tx, rx) = crate::ble::trainer_data_channel();
 
         let result = conn.connect_and_setup(&tx).await;
         assert!(result.is_ok(), "Expected success after retry");
@@ -1037,13 +1033,13 @@ mod tests {
         config.feature_data = vec![0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00];
         let peripheral = TestPeripheral::new(config);
         let mut conn = FtmsConnection::new(peripheral);
-        let (tx, _rx) = crate::trainer_data_channel();
+        let (tx, _rx) = crate::ble::trainer_data_channel();
 
         let _stream = conn.connect_and_setup(&tx).await.unwrap();
         let features = conn.parsed_features().unwrap();
         assert!(features
             .target_setting
-            .contains(ftms_parser::TargetSettingFeatures::POWER_TARGET));
+            .contains(crate::parser::TargetSettingFeatures::POWER_TARGET));
     }
 
     #[tokio::test]
@@ -1060,7 +1056,7 @@ mod tests {
         let config = MockPeripheralConfig::default();
         let peripheral = ConnectFailPeripheral::new(config, DISCOVER_SERVICES_MAX_ATTEMPTS);
         let mut conn = FtmsConnection::new(peripheral);
-        let (tx, _rx) = crate::trainer_data_channel();
+        let (tx, _rx) = crate::ble::trainer_data_channel();
 
         let result = conn.connect_and_setup(&tx).await;
         assert!(matches!(result, Err(BleTransportError::Btleplug(_))));

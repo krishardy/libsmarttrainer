@@ -1,10 +1,10 @@
 //! Discover FTMS-compatible smart trainers over BLE.
 //!
-//! Run with: `cargo run -p ble-transport --example scan`
+//! Run with: `cargo run --example scan`
 
 use std::time::Duration;
 
-use ble_transport::{get_adapter, scan_for_ftms_devices};
+use libsmarttrainer::ble::{get_adapter, scan_for_ftms_devices};
 
 #[tokio::main]
 async fn main() {

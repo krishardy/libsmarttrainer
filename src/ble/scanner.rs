@@ -2,9 +2,9 @@ use std::time::Duration;
 
 use btleplug::api::{Manager as _, ScanFilter};
 
-use crate::constants::FTMS_SERVICE_UUID;
-use crate::error::{BleTransportError, Result};
-use crate::traits::{BleAdapter, BlePeripheral, BtleplugAdapter};
+use crate::ble::constants::FTMS_SERVICE_UUID;
+use crate::ble::error::{BleTransportError, Result};
+use crate::ble::traits::{BleAdapter, BlePeripheral, BtleplugAdapter};
 
 /// A discovered FTMS device with its name and address.
 #[derive(Debug, Clone)]
@@ -62,7 +62,7 @@ pub async fn get_adapter() -> Result<BtleplugAdapter> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::traits::BlePeripheral;
+    use crate::ble::traits::BlePeripheral;
     use async_trait::async_trait;
     use btleplug::api::{
         Characteristic, PeripheralProperties, ScanFilter, Service, ValueNotification, WriteType,

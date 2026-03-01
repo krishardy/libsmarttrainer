@@ -7,7 +7,7 @@ pub mod scanner;
 pub mod traits;
 pub mod transport;
 
-use ftms_parser::IndoorBikeData;
+use crate::parser::IndoorBikeData;
 
 // Re-export key public types.
 pub use commands::TrainerCommand;

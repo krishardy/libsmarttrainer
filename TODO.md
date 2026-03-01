@@ -4,8 +4,6 @@
 
 ### Hardening
 
-- [ ] Multiple trainer support (handle >1 FTMS device in range) [Low, 2h]
-
 ### Documentation
 
 (none)

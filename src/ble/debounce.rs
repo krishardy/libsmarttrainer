@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use crate::commands::TrainerCommand;
+use crate::ble::commands::TrainerCommand;
 
 /// Default minimum interval between commands sent to the trainer.
 const DEFAULT_MIN_INTERVAL: Duration = Duration::from_secs(1);
@@ -13,7 +13,8 @@ const DEFAULT_MIN_INTERVAL: Duration = Duration::from_secs(1);
 /// the interval elapses.
 ///
 /// Safety-critical commands (ERG safety overrides) bypass the debouncer
-/// entirely, but should call [`record_write`] afterward to reset the timer.
+/// entirely, but should call [`CommandDebouncer::record_write`] afterward to
+/// reset the timer.
 pub struct CommandDebouncer {
     last_write: Option<Instant>,
     pending: Option<TrainerCommand>,

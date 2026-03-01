@@ -1,6 +1,4 @@
-#![no_std]
-
-use ftms_parser::IndoorBikeData;
+use crate::parser::IndoorBikeData;
 
 /// Apply default trainer quirks to parsed Indoor Bike Data.
 ///

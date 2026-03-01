@@ -7,11 +7,11 @@
 //!   4. Read data for 10 seconds
 //!   5. Disconnect
 //!
-//! Run with: `cargo run -p ble-transport --example full_workflow`
+//! Run with: `cargo run --example full_workflow`
 
 use std::time::Duration;
 
-use ble_transport::{
+use libsmarttrainer::ble::{
     connect_to_trainer, get_adapter, scan_for_ftms_devices, trainer_data_channel, ConnectionState,
 };
 

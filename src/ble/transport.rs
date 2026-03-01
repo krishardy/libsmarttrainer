@@ -1,18 +1,18 @@
 use btleplug::api::ValueNotification;
-use ftms_parser::IndoorBikeData;
+use crate::parser::IndoorBikeData;
 use futures::stream::StreamExt;
 use log::{error, info, warn};
-use safety::erg_safety::ErgSafetyMonitor;
+use crate::safety::ErgSafetyMonitor;
 use std::time::Instant;
 use tokio::sync::{mpsc, watch};
 
-use crate::commands::TrainerCommand;
-use crate::connection::FtmsConnection;
-use crate::constants::INDOOR_BIKE_DATA_UUID;
-use crate::debounce::CommandDebouncer;
-use crate::error::Result;
-use crate::traits::BlePeripheral;
-use crate::{ConnectionState, TrainerData};
+use crate::ble::commands::TrainerCommand;
+use crate::ble::connection::FtmsConnection;
+use crate::ble::constants::INDOOR_BIKE_DATA_UUID;
+use crate::ble::debounce::CommandDebouncer;
+use crate::ble::error::Result;
+use crate::ble::traits::BlePeripheral;
+use crate::ble::{ConnectionState, TrainerData};
 
 /// Check whether the trainer supports a given command based on parsed features.
 ///
@@ -21,15 +21,15 @@ use crate::{ConnectionState, TrainerData};
 /// explicitly absent.
 pub(crate) fn validate_command_feature(
     cmd: &TrainerCommand,
-    features: &Option<ftms_parser::FitnessMachineFeature>,
-) -> std::result::Result<(), crate::error::BleTransportError> {
+    features: &Option<crate::parser::FitnessMachineFeature>,
+) -> std::result::Result<(), crate::ble::error::BleTransportError> {
     let Some(f) = features else {
         return Ok(());
     };
     match cmd {
         TrainerCommand::SetTargetPower(_) => {
-            if !f.target_setting.contains(ftms_parser::TargetSettingFeatures::POWER_TARGET) {
-                return Err(crate::error::BleTransportError::FeatureNotSupported(
+            if !f.target_setting.contains(crate::parser::TargetSettingFeatures::POWER_TARGET) {
+                return Err(crate::ble::error::BleTransportError::FeatureNotSupported(
                     "power target".into(),
                 ));
             }
@@ -37,9 +37,9 @@ pub(crate) fn validate_command_feature(
         TrainerCommand::SetTargetResistance(_) => {
             if !f
                 .target_setting
-                .contains(ftms_parser::TargetSettingFeatures::RESISTANCE_TARGET)
+                .contains(crate::parser::TargetSettingFeatures::RESISTANCE_TARGET)
             {
-                return Err(crate::error::BleTransportError::FeatureNotSupported(
+                return Err(crate::ble::error::BleTransportError::FeatureNotSupported(
                     "resistance target".into(),
                 ));
             }
@@ -47,9 +47,9 @@ pub(crate) fn validate_command_feature(
         TrainerCommand::SetIndoorBikeSimulation { .. } => {
             if !f
                 .target_setting
-                .contains(ftms_parser::TargetSettingFeatures::INDOOR_BIKE_SIMULATION)
+                .contains(crate::parser::TargetSettingFeatures::INDOOR_BIKE_SIMULATION)
             {
-                return Err(crate::error::BleTransportError::FeatureNotSupported(
+                return Err(crate::ble::error::BleTransportError::FeatureNotSupported(
                     "indoor bike simulation".into(),
                 ));
             }
@@ -78,9 +78,9 @@ pub(crate) fn handle_notification(
 ) -> (LoopAction, Option<IndoorBikeData>) {
     match notification {
         Some(notif) if notif.uuid == INDOOR_BIKE_DATA_UUID => {
-            match ftms_parser::parse_indoor_bike_data(&notif.value) {
+            match crate::parser::parse_indoor_bike_data(&notif.value) {
                 Ok(mut bike_data) => {
-                    trainer_quirks::apply_default_quirks(&mut bike_data);
+                    crate::quirks::apply_default_quirks(&mut bike_data);
                     let _ = data_tx.send(TrainerData {
                         connection_state: ConnectionState::Connected,
                         bike_data: Some(bike_data.clone()),
@@ -331,8 +331,8 @@ pub async fn connect_to_trainer<P: BlePeripheral>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constants::*;
-    use crate::traits::BlePeripheral;
+    use crate::ble::constants::*;
+    use crate::ble::traits::BlePeripheral;
     use async_trait::async_trait;
     use btleplug::api::{
         CharPropFlags, Characteristic, PeripheralProperties, Service, ValueNotification, WriteType,
@@ -489,7 +489,7 @@ mod tests {
             .await
             .unwrap();
 
-        let (data_tx, data_rx) = crate::trainer_data_channel();
+        let (data_tx, data_rx) = crate::ble::trainer_data_channel();
         let (handle, join_handle) =
             connect_to_trainer(peripheral, data_tx, data_rx).await.unwrap();
 
@@ -536,7 +536,7 @@ mod tests {
             .await
             .unwrap();
 
-        let (data_tx, data_rx) = crate::trainer_data_channel();
+        let (data_tx, data_rx) = crate::ble::trainer_data_channel();
         let (handle, join_handle) =
             connect_to_trainer(peripheral, data_tx, data_rx).await.unwrap();
 
@@ -562,7 +562,7 @@ mod tests {
             .await
             .unwrap();
 
-        let (data_tx, data_rx) = crate::trainer_data_channel();
+        let (data_tx, data_rx) = crate::ble::trainer_data_channel();
         let (handle, join_handle) =
             connect_to_trainer(peripheral, data_tx, data_rx).await.unwrap();
 
@@ -588,7 +588,7 @@ mod tests {
             .await
             .unwrap();
 
-        let (data_tx, data_rx) = crate::trainer_data_channel();
+        let (data_tx, data_rx) = crate::ble::trainer_data_channel();
         let (handle, join_handle) =
             connect_to_trainer(peripheral, data_tx, data_rx).await.unwrap();
 
@@ -609,7 +609,6 @@ mod tests {
 
         // Wait for the valid data to arrive.
         let mut rx = handle.data_receiver();
-        // The task should still be running and process the second notification.
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
                 rx.changed().await.unwrap();
@@ -643,7 +642,7 @@ mod tests {
             .await
             .unwrap();
 
-        let (data_tx, data_rx) = crate::trainer_data_channel();
+        let (data_tx, data_rx) = crate::ble::trainer_data_channel();
         let (handle, join_handle) =
             connect_to_trainer(peripheral, data_tx, data_rx).await.unwrap();
 
@@ -686,7 +685,7 @@ mod tests {
             .await
             .unwrap();
 
-        let (data_tx, data_rx) = crate::trainer_data_channel();
+        let (data_tx, data_rx) = crate::ble::trainer_data_channel();
         let (handle, join_handle) =
             connect_to_trainer(peripheral, data_tx, data_rx).await.unwrap();
 
@@ -727,7 +726,7 @@ mod tests {
     #[tokio::test]
     async fn trainer_handle_set_target_resistance() {
         let (tx, mut rx) = mpsc::channel(1);
-        let (_data_tx, data_rx) = crate::trainer_data_channel();
+        let (_data_tx, data_rx) = crate::ble::trainer_data_channel();
         let handle = TrainerHandle {
             command_tx: tx,
             data_rx,
@@ -740,7 +739,7 @@ mod tests {
     #[tokio::test]
     async fn trainer_handle_set_indoor_bike_simulation() {
         let (tx, mut rx) = mpsc::channel(1);
-        let (_data_tx, data_rx) = crate::trainer_data_channel();
+        let (_data_tx, data_rx) = crate::ble::trainer_data_channel();
         let handle = TrainerHandle {
             command_tx: tx,
             data_rx,
@@ -757,7 +756,7 @@ mod tests {
     #[tokio::test]
     async fn trainer_handle_reset() {
         let (tx, mut rx) = mpsc::channel(1);
-        let (_data_tx, data_rx) = crate::trainer_data_channel();
+        let (_data_tx, data_rx) = crate::ble::trainer_data_channel();
         let handle = TrainerHandle {
             command_tx: tx,
             data_rx,
@@ -781,7 +780,7 @@ mod tests {
             .await
             .unwrap();
 
-        let (data_tx, data_rx) = crate::trainer_data_channel();
+        let (data_tx, data_rx) = crate::ble::trainer_data_channel();
         let (handle, join_handle) =
             connect_to_trainer(peripheral, data_tx, data_rx).await.unwrap();
 
@@ -799,7 +798,7 @@ mod tests {
 
     #[test]
     fn handle_notification_bike_data() {
-        let (data_tx, data_rx) = crate::trainer_data_channel();
+        let (data_tx, data_rx) = crate::ble::trainer_data_channel();
         let notif = Some(bike_data_notification(2500, 180, 200));
         let (action, bike_data) = handle_notification(notif, &data_tx);
         assert_eq!(action, LoopAction::Continue);
@@ -812,7 +811,7 @@ mod tests {
 
     #[test]
     fn handle_notification_parse_error() {
-        let (data_tx, data_rx) = crate::trainer_data_channel();
+        let (data_tx, data_rx) = crate::ble::trainer_data_channel();
         let notif = Some(ValueNotification {
             uuid: INDOOR_BIKE_DATA_UUID,
             value: vec![0x00], // Too short to parse
@@ -826,7 +825,7 @@ mod tests {
 
     #[test]
     fn handle_notification_non_bike_data() {
-        let (data_tx, data_rx) = crate::trainer_data_channel();
+        let (data_tx, data_rx) = crate::ble::trainer_data_channel();
         let notif = Some(ValueNotification {
             uuid: FITNESS_MACHINE_STATUS_UUID,
             value: vec![0x01],
@@ -839,7 +838,7 @@ mod tests {
 
     #[test]
     fn handle_notification_stream_ended() {
-        let (data_tx, data_rx) = crate::trainer_data_channel();
+        let (data_tx, data_rx) = crate::ble::trainer_data_channel();
         let (action, bike_data) = handle_notification(None, &data_tx);
         assert_eq!(action, LoopAction::Break);
         assert!(bike_data.is_none());
@@ -848,7 +847,7 @@ mod tests {
 
     #[test]
     fn send_disconnected_sets_state() {
-        let (data_tx, data_rx) = crate::trainer_data_channel();
+        let (data_tx, data_rx) = crate::ble::trainer_data_channel();
         // First set to connected.
         let _ = data_tx.send(TrainerData {
             connection_state: ConnectionState::Connected,
@@ -867,16 +866,15 @@ mod tests {
 
     #[test]
     fn validate_allows_when_features_none() {
-        // Fail-open: no parsed features → all commands allowed.
         let cmd = TrainerCommand::SetTargetPower(200);
         assert!(validate_command_feature(&cmd, &None).is_ok());
     }
 
     #[test]
     fn validate_allows_supported_power_target() {
-        let features = Some(ftms_parser::FitnessMachineFeature {
-            fitness_machine: ftms_parser::FitnessMachineFeatures::empty(),
-            target_setting: ftms_parser::TargetSettingFeatures::POWER_TARGET,
+        let features = Some(crate::parser::FitnessMachineFeature {
+            fitness_machine: crate::parser::FitnessMachineFeatures::empty(),
+            target_setting: crate::parser::TargetSettingFeatures::POWER_TARGET,
         });
         let cmd = TrainerCommand::SetTargetPower(200);
         assert!(validate_command_feature(&cmd, &features).is_ok());
@@ -884,31 +882,31 @@ mod tests {
 
     #[test]
     fn validate_rejects_unsupported_power_target() {
-        let features = Some(ftms_parser::FitnessMachineFeature {
-            fitness_machine: ftms_parser::FitnessMachineFeatures::empty(),
-            target_setting: ftms_parser::TargetSettingFeatures::empty(),
+        let features = Some(crate::parser::FitnessMachineFeature {
+            fitness_machine: crate::parser::FitnessMachineFeatures::empty(),
+            target_setting: crate::parser::TargetSettingFeatures::empty(),
         });
         let cmd = TrainerCommand::SetTargetPower(200);
         let err = validate_command_feature(&cmd, &features).unwrap_err();
-        assert!(matches!(err, crate::error::BleTransportError::FeatureNotSupported(_)));
+        assert!(matches!(err, crate::ble::error::BleTransportError::FeatureNotSupported(_)));
     }
 
     #[test]
     fn validate_rejects_unsupported_resistance() {
-        let features = Some(ftms_parser::FitnessMachineFeature {
-            fitness_machine: ftms_parser::FitnessMachineFeatures::empty(),
-            target_setting: ftms_parser::TargetSettingFeatures::POWER_TARGET,
+        let features = Some(crate::parser::FitnessMachineFeature {
+            fitness_machine: crate::parser::FitnessMachineFeatures::empty(),
+            target_setting: crate::parser::TargetSettingFeatures::POWER_TARGET,
         });
         let cmd = TrainerCommand::SetTargetResistance(50);
         let err = validate_command_feature(&cmd, &features).unwrap_err();
-        assert!(matches!(err, crate::error::BleTransportError::FeatureNotSupported(_)));
+        assert!(matches!(err, crate::ble::error::BleTransportError::FeatureNotSupported(_)));
     }
 
     #[test]
     fn validate_rejects_unsupported_simulation() {
-        let features = Some(ftms_parser::FitnessMachineFeature {
-            fitness_machine: ftms_parser::FitnessMachineFeatures::empty(),
-            target_setting: ftms_parser::TargetSettingFeatures::POWER_TARGET,
+        let features = Some(crate::parser::FitnessMachineFeature {
+            fitness_machine: crate::parser::FitnessMachineFeatures::empty(),
+            target_setting: crate::parser::TargetSettingFeatures::POWER_TARGET,
         });
         let cmd = TrainerCommand::SetIndoorBikeSimulation {
             grade_001_pct: 500,
@@ -916,14 +914,14 @@ mod tests {
             cw: 51,
         };
         let err = validate_command_feature(&cmd, &features).unwrap_err();
-        assert!(matches!(err, crate::error::BleTransportError::FeatureNotSupported(_)));
+        assert!(matches!(err, crate::ble::error::BleTransportError::FeatureNotSupported(_)));
     }
 
     #[test]
     fn validate_allows_disconnect_and_reset() {
-        let features = Some(ftms_parser::FitnessMachineFeature {
-            fitness_machine: ftms_parser::FitnessMachineFeatures::empty(),
-            target_setting: ftms_parser::TargetSettingFeatures::empty(),
+        let features = Some(crate::parser::FitnessMachineFeature {
+            fitness_machine: crate::parser::FitnessMachineFeatures::empty(),
+            target_setting: crate::parser::TargetSettingFeatures::empty(),
         });
         assert!(validate_command_feature(&TrainerCommand::Disconnect, &features).is_ok());
         assert!(validate_command_feature(&TrainerCommand::Reset, &features).is_ok());

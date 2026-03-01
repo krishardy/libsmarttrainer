@@ -26,24 +26,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "843867be96c8daad0d758b57df9392b6d8d271134fce549de6ce169ff98a92af"
 
 [[package]]
-name = "ble-transport"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "btleplug",
- "ftms-parser",
- "futures",
- "log",
- "mockall",
- "safety",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "trainer-quirks",
- "uuid",
-]
-
-[[package]]
 name = "block2"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -229,13 +211,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28dd6caf6059519a65843af8fe2a3ae298b14b80179855aeb4adc2c1934ee619"
 
 [[package]]
-name = "ftms-parser"
-version = "0.1.0"
-dependencies = [
- "bitflags",
-]
-
-[[package]]
 name = "futures"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -396,6 +371,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "328c4789d42200f1eeec05bd86c9c13c7f091d2ba9a6ea35acdf51f31bc0f043"
 dependencies = [
  "pkg-config",
+]
+
+[[package]]
+name = "libsmarttrainer"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bitflags",
+ "btleplug",
+ "futures",
+ "log",
+ "mockall",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "uuid",
 ]
 
 [[package]]
@@ -602,10 +593,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
-name = "safety"
-version = "0.1.0"
-
-[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -808,13 +795,6 @@ dependencies = [
  "futures-sink",
  "pin-project-lite",
  "tokio",
-]
-
-[[package]]
-name = "trainer-quirks"
-version = "0.1.0"
-dependencies = [
- "ftms-parser",
 ]
 
 [[package]]

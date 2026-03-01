@@ -1,3 +1,8 @@
+//! ERG death spiral protection.
+//!
+//! Monitors cadence while in ERG mode and prevents the "death spiral" where
+//! falling cadence causes increasing resistance, which further reduces cadence.
+
 use std::time::{Duration, Instant};
 
 /// Cadence below this triggers the death spiral timeout.

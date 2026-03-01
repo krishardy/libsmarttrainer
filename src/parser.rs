@@ -1,5 +1,3 @@
-#![no_std]
-
 use bitflags::bitflags;
 
 bitflags! {
@@ -365,12 +363,8 @@ pub fn parse_feature(data: &[u8]) -> Result<FitnessMachineFeature, ParseError> {
 }
 
 #[cfg(test)]
-extern crate alloc;
-
-#[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::format;
 
     // ── Display tests ──────────────────────────────────────────
 
@@ -632,76 +626,60 @@ mod tests {
 
     #[test]
     fn parse_indoor_bike_data_truncated_avg_speed() {
-        // AVERAGE_SPEED flag set but no data for it after speed bytes.
-        // Flags: AVERAGE_SPEED = 0x0002, MORE_DATA not set => speed present.
-        // Provide flags + speed only, no avg speed bytes.
         let data = [0x02, 0x00, 0xC4, 0x09];
         assert_eq!(parse_indoor_bike_data(&data), Err(ParseError::TooShort));
     }
 
     #[test]
     fn parse_indoor_bike_data_truncated_cadence() {
-        // INSTANTANEOUS_CADENCE flag set but payload ends before cadence bytes.
-        // Flags: INSTANTANEOUS_CADENCE = 0x0004.
         let data = [0x04, 0x00, 0xC4, 0x09];
         assert_eq!(parse_indoor_bike_data(&data), Err(ParseError::TooShort));
     }
 
     #[test]
     fn parse_indoor_bike_data_truncated_avg_cadence() {
-        // INSTANTANEOUS_CADENCE | AVERAGE_CADENCE = 0x000C.
-        // Provide speed + cadence but no avg cadence.
         let data = [0x0C, 0x00, 0xC4, 0x09, 0xB4, 0x00];
         assert_eq!(parse_indoor_bike_data(&data), Err(ParseError::TooShort));
     }
 
     #[test]
     fn parse_indoor_bike_data_truncated_total_distance() {
-        // TOTAL_DISTANCE = 0x0010.
         let data = [0x10, 0x00, 0xC4, 0x09];
         assert_eq!(parse_indoor_bike_data(&data), Err(ParseError::TooShort));
     }
 
     #[test]
     fn parse_indoor_bike_data_truncated_resistance() {
-        // RESISTANCE_LEVEL = 0x0020.
         let data = [0x20, 0x00, 0xC4, 0x09];
         assert_eq!(parse_indoor_bike_data(&data), Err(ParseError::TooShort));
     }
 
     #[test]
     fn parse_indoor_bike_data_truncated_power() {
-        // INSTANTANEOUS_POWER = 0x0040.
         let data = [0x40, 0x00, 0xC4, 0x09];
         assert_eq!(parse_indoor_bike_data(&data), Err(ParseError::TooShort));
     }
 
     #[test]
     fn parse_indoor_bike_data_truncated_avg_power() {
-        // INSTANTANEOUS_POWER | AVERAGE_POWER = 0x00C0.
-        // Provide speed + power but no avg power.
         let data = [0xC0, 0x00, 0xC4, 0x09, 0xC8, 0x00];
         assert_eq!(parse_indoor_bike_data(&data), Err(ParseError::TooShort));
     }
 
     #[test]
     fn parse_indoor_bike_data_truncated_expended_energy() {
-        // EXPENDED_ENERGY = 0x0100.
         let data = [0x00, 0x01, 0xC4, 0x09];
         assert_eq!(parse_indoor_bike_data(&data), Err(ParseError::TooShort));
     }
 
     #[test]
     fn parse_indoor_bike_data_truncated_heart_rate() {
-        // HEART_RATE = 0x0200.
         let data = [0x00, 0x02, 0xC4, 0x09];
         assert_eq!(parse_indoor_bike_data(&data), Err(ParseError::TooShort));
     }
 
     #[test]
     fn parse_feature_typical_indoor_bike_trainer() {
-        // Fitness Machine Features: CADENCE(1) | RESISTANCE_LEVEL(7) | ELAPSED_TIME(12) | POWER_MEASUREMENT(14) = 0x00005082
-        // Target Setting Features: RESISTANCE_TARGET(2) | POWER_TARGET(3) | INDOOR_BIKE_SIMULATION(13) = 0x0000200C
         let data = [0x82, 0x50, 0x00, 0x00, 0x0C, 0x20, 0x00, 0x00];
         let result = parse_feature(&data).unwrap();
         assert!(result.fitness_machine.contains(FitnessMachineFeatures::CADENCE));
@@ -719,8 +697,6 @@ mod tests {
 
     #[test]
     fn parse_indoor_bike_data_speed_and_heart_rate() {
-        // Flags: HEART_RATE = 0x0200, MORE_DATA not set => speed present.
-        // Speed: 2800 => 28.00 km/h, HR: 145 bpm
         let data = [0x00, 0x02, 0xF0, 0x0A, 0x91];
         let result = parse_indoor_bike_data(&data).unwrap();
         assert!((result.instantaneous_speed_kmh.unwrap() - 28.0).abs() < 0.01);
@@ -731,7 +707,6 @@ mod tests {
 
     #[test]
     fn parse_indoor_bike_data_zero_speed() {
-        // Flags: 0x0000, Speed: 0 => 0.00 km/h
         let data = [0x00, 0x00, 0x00, 0x00];
         let result = parse_indoor_bike_data(&data).unwrap();
         assert!((result.instantaneous_speed_kmh.unwrap()).abs() < 0.01);
@@ -742,8 +717,6 @@ mod tests {
 
     #[test]
     fn parse_indoor_bike_data_high_cadence_high_power() {
-        // Flags: INSTANTANEOUS_CADENCE | INSTANTANEOUS_POWER = 0x0044
-        // Speed: 4500 => 45.00 km/h, Cadence: 240 => 120.0 rpm, Power: 400W
         let data = [0x44, 0x00, 0x94, 0x11, 0xF0, 0x00, 0x90, 0x01];
         let result = parse_indoor_bike_data(&data).unwrap();
         assert!((result.instantaneous_speed_kmh.unwrap() - 45.0).abs() < 0.01);
@@ -753,8 +726,6 @@ mod tests {
 
     #[test]
     fn parse_indoor_bike_data_negative_power() {
-        // Flags: INSTANTANEOUS_POWER = 0x0040
-        // Speed: 1000 => 10.00 km/h, Power: -10W (0xFFF6 as i16 LE)
         let data = [0x40, 0x00, 0xE8, 0x03, 0xF6, 0xFF];
         let result = parse_indoor_bike_data(&data).unwrap();
         assert!((result.instantaneous_speed_kmh.unwrap() - 10.0).abs() < 0.01);
@@ -763,8 +734,6 @@ mod tests {
 
     #[test]
     fn parse_indoor_bike_data_more_data_power_only() {
-        // Flags: MORE_DATA | INSTANTANEOUS_POWER = 0x0041
-        // No speed bytes (MORE_DATA set), Power: 150W
         let data = [0x41, 0x00, 0x96, 0x00];
         let result = parse_indoor_bike_data(&data).unwrap();
         assert_eq!(result.instantaneous_speed_kmh, None);
@@ -775,7 +744,6 @@ mod tests {
 
     #[test]
     fn parse_control_point_response_extra_bytes() {
-        // Some trainers send trailing padding bytes; parser should ignore them.
         let data = [0x80, 0x05, 0x01, 0x00, 0x00];
         let resp = parse_control_point_response(&data).unwrap();
         assert_eq!(resp.request_op_code, control_point::SET_TARGET_POWER);
@@ -809,11 +777,8 @@ mod tests {
 
     #[test]
     fn real_jetblack_volt_v2_feature() {
-        // Captured from JetBlack Volt V2 via btmon
-        // 0x2ACC Fitness Machine Feature characteristic — ATT Read Response
         let data = [0x87, 0x44, 0x00, 0x00, 0x0c, 0xe0, 0x00, 0x00];
         let result = parse_feature(&data).unwrap();
-        // Fitness Machine Features: 0x00004487
         assert!(result.fitness_machine.contains(FitnessMachineFeatures::AVERAGE_SPEED));
         assert!(result.fitness_machine.contains(FitnessMachineFeatures::CADENCE));
         assert!(result.fitness_machine.contains(FitnessMachineFeatures::TOTAL_DISTANCE));
@@ -822,7 +787,6 @@ mod tests {
         assert!(result.fitness_machine.contains(FitnessMachineFeatures::POWER_MEASUREMENT));
         assert!(!result.fitness_machine.contains(FitnessMachineFeatures::INCLINATION));
         assert!(!result.fitness_machine.contains(FitnessMachineFeatures::ELAPSED_TIME));
-        // Target Setting Features: 0x0000e00c
         assert!(result.target_setting.contains(TargetSettingFeatures::RESISTANCE_TARGET));
         assert!(result.target_setting.contains(TargetSettingFeatures::POWER_TARGET));
         assert!(result.target_setting.contains(TargetSettingFeatures::INDOOR_BIKE_SIMULATION));
@@ -834,8 +798,6 @@ mod tests {
 
     #[test]
     fn real_jetblack_volt_v2_indoor_bike_data_at_rest() {
-        // Captured from JetBlack Volt V2 via btmon — trainer idle, not pedaling
-        // 0x2AD2 Indoor Bike Data notification (t≈110s in capture)
         let data = [0x64, 0x02, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x4f];
         let result = parse_indoor_bike_data(&data).unwrap();
         assert!((result.instantaneous_speed_kmh.unwrap()).abs() < 0.01);
@@ -846,8 +808,6 @@ mod tests {
 
     #[test]
     fn real_jetblack_volt_v2_indoor_bike_data_easy_spin() {
-        // Captured from JetBlack Volt V2 via btmon — light pedaling
-        // 0x2AD2 Indoor Bike Data notification (t≈143s in capture)
         let data = [0x64, 0x02, 0xb2, 0x06, 0x7c, 0x00, 0x04, 0x00, 0x3a, 0x00, 0x56];
         let result = parse_indoor_bike_data(&data).unwrap();
         assert!((result.instantaneous_speed_kmh.unwrap() - 17.14).abs() < 0.01);
@@ -858,8 +818,6 @@ mod tests {
 
     #[test]
     fn real_jetblack_volt_v2_indoor_bike_data_moderate_effort() {
-        // Captured from JetBlack Volt V2 via btmon — steady moderate pedaling
-        // 0x2AD2 Indoor Bike Data notification (t≈165s in capture)
         let data = [0x64, 0x02, 0xd3, 0x0a, 0x90, 0x00, 0x04, 0x00, 0xa2, 0x00, 0x63];
         let result = parse_indoor_bike_data(&data).unwrap();
         assert!((result.instantaneous_speed_kmh.unwrap() - 27.71).abs() < 0.01);
@@ -870,8 +828,6 @@ mod tests {
 
     #[test]
     fn real_jetblack_volt_v2_indoor_bike_data_sprint() {
-        // Captured from JetBlack Volt V2 via btmon — peak sprint effort
-        // 0x2AD2 Indoor Bike Data notification (t≈175s in capture)
         let data = [0x64, 0x02, 0x42, 0x0f, 0x9e, 0x00, 0x04, 0x00, 0x22, 0x02, 0x6b];
         let result = parse_indoor_bike_data(&data).unwrap();
         assert!((result.instantaneous_speed_kmh.unwrap() - 39.06).abs() < 0.01);
@@ -882,8 +838,6 @@ mod tests {
 
     #[test]
     fn real_jetblack_volt_v2_indoor_bike_data_coast_down() {
-        // Captured from JetBlack Volt V2 via btmon — stopped pedaling, speed decreasing
-        // 0x2AD2 Indoor Bike Data notification (t≈199s in capture)
         let data = [0x64, 0x02, 0x30, 0x03, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x76];
         let result = parse_indoor_bike_data(&data).unwrap();
         assert!((result.instantaneous_speed_kmh.unwrap() - 8.16).abs() < 0.01);
@@ -894,10 +848,6 @@ mod tests {
 
     #[test]
     fn real_jetblack_volt_v2_indoor_bike_data_stopped_hr_zero() {
-        // Captured from JetBlack Volt V2 via btmon — fully stopped, HR reports 0
-        // 0x2AD2 Indoor Bike Data notification (t≈207s in capture)
-        // Demonstrates trainer quirk: heart_rate_bpm=0 when fully stopped.
-        // Parser returns raw Some(0); trainer-quirks crate filters to None.
         let data = [0x64, 0x02, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00];
         let result = parse_indoor_bike_data(&data).unwrap();
         assert!((result.instantaneous_speed_kmh.unwrap()).abs() < 0.01);
@@ -908,10 +858,6 @@ mod tests {
 
     #[test]
     fn parse_indoor_bike_data_hr_zero_raw() {
-        // HEART_RATE flag set, HR byte = 0 → returned as raw Some(0).
-        // Device-specific filtering is handled by the trainer-quirks crate.
-        // Flags: HEART_RATE = 0x0200, speed present (MORE_DATA not set).
-        // Speed: 2000 => 20.00 km/h, HR: 0 bpm
         let data = [0x00, 0x02, 0xD0, 0x07, 0x00];
         let result = parse_indoor_bike_data(&data).unwrap();
         assert!((result.instantaneous_speed_kmh.unwrap() - 20.0).abs() < 0.01);
@@ -920,9 +866,6 @@ mod tests {
 
     #[test]
     fn parse_indoor_bike_data_hr_one_not_filtered() {
-        // HEART_RATE flag set, HR byte = 1 → preserved as Some(1).
-        // Flags: HEART_RATE = 0x0200, speed present (MORE_DATA not set).
-        // Speed: 2000 => 20.00 km/h, HR: 1 bpm
         let data = [0x00, 0x02, 0xD0, 0x07, 0x01];
         let result = parse_indoor_bike_data(&data).unwrap();
         assert!((result.instantaneous_speed_kmh.unwrap() - 20.0).abs() < 0.01);
@@ -931,15 +874,6 @@ mod tests {
 
     #[test]
     fn parse_indoor_bike_data_all_fields() {
-        // Flags: MORE_DATA | AVERAGE_SPEED | INSTANTANEOUS_CADENCE |
-        //        AVERAGE_CADENCE | TOTAL_DISTANCE | RESISTANCE_LEVEL |
-        //        INSTANTANEOUS_POWER | AVERAGE_POWER | EXPENDED_ENERGY |
-        //        HEART_RATE = 0x03FF
-        //
-        // Layout after 2-byte flags:
-        //   avg speed (2), inst cadence (2), avg cadence (2),
-        //   total distance (3), resistance level (2), inst power (2),
-        //   avg power (2), expended energy (5), heart rate (1)
         let data: [u8; 23] = [
             0xFF, 0x03, // flags
             0x00, 0x00, // avg speed (skipped)
@@ -953,7 +887,6 @@ mod tests {
             0x48, // heart rate: 72 bpm
         ];
         let result = parse_indoor_bike_data(&data).unwrap();
-        // MORE_DATA set => no speed
         assert_eq!(result.instantaneous_speed_kmh, None);
         assert!((result.instantaneous_cadence_rpm.unwrap() - 90.0).abs() < 0.1);
         assert_eq!(result.instantaneous_power_watts, Some(200));

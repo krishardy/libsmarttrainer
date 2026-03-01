@@ -1,4 +1,4 @@
-use ftms_parser::{ControlPointResponse, ParseError};
+use crate::parser::{ControlPointResponse, ParseError};
 
 /// Errors from BLE transport operations.
 #[derive(Debug, thiserror::Error)]
@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn display_control_point_rejected() {
-        use ftms_parser::{ControlPointResultCode, ControlPointResponse};
+        use crate::parser::{ControlPointResultCode, ControlPointResponse};
         let resp = ControlPointResponse {
             request_op_code: 0x05,
             result_code: ControlPointResultCode::NotSupported,
@@ -256,7 +256,7 @@ mod tests {
 
     #[test]
     fn user_message_control_point_rejected() {
-        use ftms_parser::{ControlPointResultCode, ControlPointResponse};
+        use crate::parser::{ControlPointResultCode, ControlPointResponse};
         let resp = ControlPointResponse {
             request_op_code: 0x05,
             result_code: ControlPointResultCode::NotSupported,

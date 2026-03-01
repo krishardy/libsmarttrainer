@@ -3,11 +3,11 @@
 //! Prints speed, cadence, power, and heart rate as they arrive.
 //! Press Ctrl+C to disconnect and exit.
 //!
-//! Run with: `cargo run -p ble-transport --example read_data`
+//! Run with: `cargo run --example read_data`
 
 use std::time::Duration;
 
-use ble_transport::{
+use libsmarttrainer::ble::{
     connect_to_trainer, get_adapter, scan_for_ftms_devices, trainer_data_channel, ConnectionState,
 };
 

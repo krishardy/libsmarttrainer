@@ -1,7 +1,0 @@
-[package]
-name = "safety"
-version = "0.1.0"
-edition.workspace = true
-
-[dependencies]
-# No external dependencies — pure logic crate

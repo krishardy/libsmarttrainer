@@ -1,50 +1,41 @@
-.PHONY: build test test-ftms test-ble test-safety test-quirks clippy clean coverage coverage-ble \
+.PHONY: build test clippy clean coverage doc publish-dry-run \
        build-examples run-example-scan run-example-connect run-example-read run-example-write run-example-full
 
 build:
-	cargo build --workspace
+	cargo build
 
 test:
-	cargo test --workspace
-
-test-ftms:
-	cargo test -p ftms-parser
-
-test-ble:
-	cargo test -p ble-transport
-
-test-safety:
-	cargo test -p safety
-
-test-quirks:
-	cargo test -p trainer-quirks
+	cargo test
 
 clippy:
-	cargo clippy --workspace -- -D warnings
+	cargo clippy -- -D warnings
 
 coverage:
-	cargo tarpaulin -p ftms-parser -p ble-transport -p safety -p trainer-quirks --out Stdout
+	cargo tarpaulin --exclude-files "src/ble/traits.rs" --out Stdout
 
-coverage-ble:
-	cargo tarpaulin -p ble-transport --exclude-files "ble-transport/src/traits.rs" --exclude-files "ftms-parser/src/lib.rs" --out Stdout
+doc:
+	cargo doc --no-deps
+
+publish-dry-run:
+	cargo publish --dry-run
 
 build-examples:
-	cargo build -p ble-transport --examples
+	cargo build --examples
 
 run-example-scan:
-	cargo run -p ble-transport --example scan
+	cargo run --example scan
 
 run-example-connect:
-	cargo run -p ble-transport --example connect
+	cargo run --example connect
 
 run-example-read:
-	cargo run -p ble-transport --example read_data
+	cargo run --example read_data
 
 run-example-write:
-	cargo run -p ble-transport --example write_data
+	cargo run --example write_data
 
 run-example-full:
-	cargo run -p ble-transport --example full_workflow
+	cargo run --example full_workflow
 
 clean:
 	cargo clean

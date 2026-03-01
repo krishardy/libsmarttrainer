@@ -28,19 +28,19 @@ impl TrainerCommand {
     pub fn serialize(&self) -> Option<Vec<u8>> {
         match self {
             TrainerCommand::SetTargetPower(watts) => {
-                Some(ftms_parser::serialize_control_point_set_target_power(*watts).to_vec())
+                Some(crate::parser::serialize_control_point_set_target_power(*watts).to_vec())
             }
             TrainerCommand::SetTargetResistance(level) => {
-                Some(ftms_parser::serialize_control_point_set_target_resistance(*level).to_vec())
+                Some(crate::parser::serialize_control_point_set_target_resistance(*level).to_vec())
             }
             TrainerCommand::SetIndoorBikeSimulation { grade_001_pct, crr, cw } => Some(
-                ftms_parser::serialize_control_point_set_indoor_bike_simulation(
+                crate::parser::serialize_control_point_set_indoor_bike_simulation(
                     0, *grade_001_pct, *crr, *cw,
                 )
                 .to_vec(),
             ),
             TrainerCommand::Reset => {
-                Some(ftms_parser::serialize_control_point_reset().to_vec())
+                Some(crate::parser::serialize_control_point_reset().to_vec())
             }
             TrainerCommand::Disconnect => None,
         }
