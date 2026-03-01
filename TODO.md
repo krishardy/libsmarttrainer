@@ -5,8 +5,6 @@
 ### Hardening
 
 - [ ] Multiple trainer support (handle >1 FTMS device in range) [Low, 2h]
-- [ ] Trainer-specific quirk testing and workarounds [4.7, Med, 4h]
-- [x] Move any JetBlack Volt v2 custom logic to a workspace member crate [3]
 
 ### Documentation
 
@@ -26,6 +24,8 @@
 ### Hardening
 
 - [x] Graceful error types: PermissionDenied variant, Display for ParseError, user_message() with recovery hints on BleTransportError [4.4]
+- [x] Trainer-specific quirk testing and workarounds [4.7, Med, 4h]
+- [x] Move any JetBlack Volt v2 custom logic to a workspace member crate [3]
 
 ### BLE Transport (ble-transport crate)
 
